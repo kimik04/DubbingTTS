@@ -29,34 +29,34 @@ def transcribe_episode(slug: str, episode: int, force: bool = False) -> list[Seg
     model = global_config["models"]["whisper"]
 
     log.info(f"ep{episode}: transcribing with whisper (lang={source_lang})")
-    raw = _run_whisper(str(audio_path), source_lang, model)
-
-    segments = _parse_whisper_output(raw)
+    segments = _run_whisper(str(audio_path), source_lang, model)
     log.info(f"ep{episode}: got {len(segments)} segments")
     save_segments(segments, output_path)
     return segments
 
 
-def _run_whisper(audio_path: str, language: str, model: str) -> dict:
+def _run_whisper(audio_path: str, language: str, model: str) -> list[Segment]:
     if platform.system() == "Darwin" and platform.machine() == "arm64":
         import mlx_whisper
-        return mlx_whisper.transcribe(
+        raw = mlx_whisper.transcribe(
             audio_path,
             language=language,
             path_or_hf_repo=model,
             word_timestamps=True,
         )
+        return _parse_mlx_output(raw)
     else:
-        import whisper
-        whisper_model = whisper.load_model("small")
-        return whisper_model.transcribe(
+        from faster_whisper import WhisperModel
+        fw_model = WhisperModel("small", device="cpu", compute_type="int8")
+        segments_iter, _ = fw_model.transcribe(
             audio_path,
             language=language,
             word_timestamps=True,
         )
+        return _parse_faster_output(segments_iter)
 
 
-def _parse_whisper_output(raw: dict) -> list[Segment]:
+def _parse_mlx_output(raw: dict) -> list[Segment]:
     segments = []
     for i, seg in enumerate(raw.get("segments", [])):
         segments.append(Segment(
@@ -64,5 +64,17 @@ def _parse_whisper_output(raw: dict) -> list[Segment]:
             start=seg["start"],
             end=seg["end"],
             text=seg["text"].strip(),
+        ))
+    return segments
+
+
+def _parse_faster_output(segments_iter) -> list[Segment]:
+    segments = []
+    for i, seg in enumerate(segments_iter):
+        segments.append(Segment(
+            index=i,
+            start=seg.start,
+            end=seg.end,
+            text=seg.text.strip(),
         ))
     return segments

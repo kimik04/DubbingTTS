@@ -198,9 +198,9 @@ episodes:
 | Platform | Whisper Engine | Notes |
 |----------|---------------|-------|
 | macOS (Apple Silicon) | mlx-whisper | Hardware-accelerated, fastest |
-| macOS (Intel) | openai-whisper | CPU-based |
-| Windows | openai-whisper | Requires Python 3.9+ |
-| Linux | openai-whisper | GPU support via CUDA optional |
+| macOS (Intel) | faster-whisper | CTranslate2, lightweight |
+| Windows | faster-whisper | No PyTorch needed, ~4x faster than openai-whisper |
+| Linux | faster-whisper | CPU int8 by default, CUDA optional |
 
 ## License
 
