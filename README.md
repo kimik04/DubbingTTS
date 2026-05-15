@@ -9,7 +9,7 @@ Automated multi-language video dubbing bot. Converts video from any source langu
 - Per-character TTS — maintains voice consistency by batching all segments per character in a single session
 - Character persistence — character database carries across episodes, new characters auto-detected
 - Full caching — every intermediate result is cached, pipeline can resume from any step
-- Cross-platform — works on macOS (Apple Silicon optimized) and Windows/Linux
+- Cross-platform — works on macOS (Apple Silicon optimized), Windows, and Linux
 
 ## Requirements
 
@@ -20,44 +20,52 @@ Automated multi-language video dubbing bot. Converts video from any source langu
 
 ## Installation
 
+### macOS
+
 ```bash
-git clone https://github.com/antono/DubbingTTS.git
+git clone https://github.com/kimik04/DubbingTTS.git
 cd DubbingTTS
 pip install -r requirements.txt
 ```
 
-Set up your config:
+### Windows
+
+```powershell
+git clone https://github.com/kimik04/DubbingTTS.git
+cd DubbingTTS
+
+# Install ffmpeg and yt-dlp (pick one)
+scoop install ffmpeg yt-dlp
+# or: choco install ffmpeg yt-dlp
+
+pip install -r requirements.txt
+```
+
+### Linux
+
+```bash
+git clone https://github.com/kimik04/DubbingTTS.git
+cd DubbingTTS
+sudo apt install ffmpeg  # or your distro's package manager
+pip install -r requirements.txt
+```
+
+### Configuration
 
 ```bash
 cp config.yaml.example config.yaml
 # Edit config.yaml and add your Gemini API key
 ```
 
-Or use an environment variable:
+Or set via environment variable:
 
 ```bash
+# macOS/Linux
 export GEMINI_API_KEY="your-key-here"
+
+# Windows PowerShell
+$env:GEMINI_API_KEY="your-key-here"
 ```
-
-### Windows
-
-On Windows, install ffmpeg via [chocolatey](https://chocolatey.org/) or [scoop](https://scoop.sh/):
-
-```powershell
-# Using scoop
-scoop install ffmpeg yt-dlp
-
-# Using chocolatey
-choco install ffmpeg yt-dlp
-```
-
-Then install Python dependencies:
-
-```powershell
-pip install -r requirements.txt
-```
-
-The transcription step uses `openai-whisper` on Windows/Linux and `mlx-whisper` (Apple Silicon optimized) on macOS.
 
 ## Quick Start
 
@@ -77,11 +85,13 @@ python -m src.cli dub --project my-drama-title --episode 1
 Video → Download → Transcribe → Identify Characters → TTS → Mix → Dubbed Video
 ```
 
-1. **Download** — fetch video + extract audio (yt-dlp or local file)
-2. **Transcribe** — speech-to-text with word-level timestamps (Whisper)
-3. **Identify** — character identification + translation via Gemini API
-4. **TTS** — text-to-speech per character via Gemini Live WebSocket API
-5. **Mix** — separate background audio (demucs), place TTS at timestamps, mux with video
+| Step | Description | Tool |
+|------|-------------|------|
+| 1. Download | Fetch video + extract audio | yt-dlp, ffmpeg |
+| 2. Transcribe | Speech-to-text with timestamps | Whisper (MLX/OpenAI) |
+| 3. Identify | Character ID + translation | Gemini API |
+| 4. TTS | Text-to-speech per character | Gemini Live WebSocket |
+| 5. Mix | Background separation + mux | Demucs, ffmpeg |
 
 ## CLI Commands
 
@@ -105,7 +115,7 @@ python -m src.cli mix --project slug --episode 1
 python -m src.cli characters --project slug
 python -m src.cli characters --project slug --add "Name" --voice Puck --gender male
 
-# Preview (transcribe + identify only)
+# Preview (transcribe + identify only, no TTS)
 python -m src.cli preview --project slug --episode 1
 ```
 
@@ -140,7 +150,7 @@ gemini_api_key: "your-key"
 
 models:
   whisper: "mlx-community/whisper-small-mlx"
-  transcribe: "gemini-2.5-flash-lite"
+  transcribe: "gemini-3.1-flash-lite-preview"
   tts: "gemini-3.1-flash-live-preview"
 
 audio:
@@ -179,9 +189,18 @@ episodes:
 
 ## Supported Languages
 
-Source (transcription): zh, en, ko, ja, th, es, fr, de, ru, ar, and 90+ more
+**Source** (transcription): zh, en, ko, ja, th, es, fr, de, ru, ar, and 90+ more
 
-Target (dubbing): id, en, zh, ms, th, and any language supported by Gemini TTS
+**Target** (dubbing): id, en, zh, ms, th, and any language supported by Gemini TTS
+
+## Platform Notes
+
+| Platform | Whisper Engine | Notes |
+|----------|---------------|-------|
+| macOS (Apple Silicon) | mlx-whisper | Hardware-accelerated, fastest |
+| macOS (Intel) | openai-whisper | CPU-based |
+| Windows | openai-whisper | Requires Python 3.9+ |
+| Linux | openai-whisper | GPU support via CUDA optional |
 
 ## License
 
