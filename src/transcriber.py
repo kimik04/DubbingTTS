@@ -43,8 +43,10 @@ def _run_whisper(audio_path: str, language: str, model: str) -> list[Segment]:
             language=language,
             path_or_hf_repo=model,
             word_timestamps=True,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.5,
         )
-        return _parse_mlx_output(raw)
+        segments = _parse_mlx_output(raw)
     else:
         from faster_whisper import WhisperModel
         fw_model = WhisperModel("small", device="cpu", compute_type="int8")
@@ -52,8 +54,52 @@ def _run_whisper(audio_path: str, language: str, model: str) -> list[Segment]:
             audio_path,
             language=language,
             word_timestamps=True,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.5,
         )
-        return _parse_faster_output(segments_iter)
+        segments = _parse_faster_output(segments_iter)
+    return _filter_hallucinations(segments)
+
+
+def _is_hallucination(text: str, duration: float) -> bool:
+    if duration > 15.0:
+        return True
+    if len(text) < 2:
+        return True
+    if duration < 0.3 and len(text) > 3:
+        return True
+    clean = text.replace(" ", "")
+    unique_chars = set(clean)
+    if len(unique_chars) <= 3 and len(clean) > 4:
+        return True
+    if len(clean) > 6:
+        for char in unique_chars:
+            if clean.count(char) / len(clean) > 0.5:
+                return True
+    # Detect repeated substrings (e.g. "色色色色")
+    if len(clean) >= 4:
+        for size in range(1, 4):
+            for start in range(len(clean) - size):
+                sub = clean[start:start+size]
+                if clean.count(sub) >= 3 and len(sub) * clean.count(sub) > len(clean) * 0.5:
+                    return True
+    return False
+
+
+def _filter_hallucinations(segments: list[Segment]) -> list[Segment]:
+    filtered = []
+    idx = 0
+    for seg in segments:
+        duration = seg.end - seg.start
+        if _is_hallucination(seg.text, duration):
+            log.debug(f"  filtered hallucination: [{seg.start:.1f}-{seg.end:.1f}] {seg.text[:30]}")
+            continue
+        seg.index = idx
+        filtered.append(seg)
+        idx += 1
+    if len(filtered) < len(segments):
+        log.info(f"  filtered {len(segments) - len(filtered)} hallucinated segments")
+    return filtered
 
 
 def _parse_mlx_output(raw: dict) -> list[Segment]:
