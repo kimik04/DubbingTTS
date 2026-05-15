@@ -137,7 +137,7 @@ def _place_tts_segments(segments, tts_dir: Path, duration: float, sample_rate: i
         filter_parts.append(f"[{i+1}]adelay={delay_ms}|{delay_ms}[d{i}]")
 
     mix_inputs = "[0]" + "".join(f"[d{i}]" for i in range(len(tts_files)))
-    filter_parts.append(f"{mix_inputs}amix=inputs={len(tts_files)+1}:duration=first:dropout_transition=0")
+    filter_parts.append(f"{mix_inputs}amix=inputs={len(tts_files)+1}:duration=first:dropout_transition=0:normalize=0")
 
     filter_complex = ";".join(filter_parts)
 
