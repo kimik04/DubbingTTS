@@ -10,7 +10,7 @@ models:
 # Audio settings
 audio:
   sample_rate: 24000
-  max_speed: 2.0
+  max_speed: 1.25
   bg_volume: 1.0
   dub_volume: 0.7
 

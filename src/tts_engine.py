@@ -96,12 +96,10 @@ async def _generate_character_tts(
         await _send_setup(ws, voice, target_name, model)
 
         for seg, wav_path in pending:
+            slot_duration = seg.end - seg.start
             try:
-                pcm = await _generate_segment(ws, seg.translation)
+                pcm = await _generate_segment(ws, seg.translation, slot_duration)
                 _pcm_to_wav(pcm, wav_path, sample_rate)
-
-                slot_duration = seg.end - seg.start
-                _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
             except Exception as e:
                 log.warning(f"  {character} seg_{seg.index}: failed ({e}), reconnecting")
                 try:
@@ -111,10 +109,8 @@ async def _generate_character_tts(
                 ws = await _connect_ws(api_key, model)
                 await _send_setup(ws, voice, target_name, model)
                 try:
-                    pcm = await _generate_segment(ws, seg.translation)
+                    pcm = await _generate_segment(ws, seg.translation, slot_duration)
                     _pcm_to_wav(pcm, wav_path, sample_rate)
-                    slot_duration = seg.end - seg.start
-                    _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
                 except Exception as e2:
                     log.error(f"  {character} seg_{seg.index}: failed after retry ({e2})")
     finally:
@@ -154,10 +150,14 @@ async def _send_setup(ws, voice: str, target_lang: str, model: str):
         raise RuntimeError(f"Setup failed: {data}")
 
 
-async def _generate_segment(ws, text: str) -> bytes:
+async def _generate_segment(ws, text: str, duration: float = 0) -> bytes:
+    if duration > 0:
+        prompt = f"[Speak this line in {duration:.1f} seconds, be concise]: {text}"
+    else:
+        prompt = text
     msg = {
         "clientContent": {
-            "turns": [{"role": "user", "parts": [{"text": text}]}],
+            "turns": [{"role": "user", "parts": [{"text": prompt}]}],
             "turnComplete": True,
         }
     }
