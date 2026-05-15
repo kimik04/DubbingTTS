@@ -151,13 +151,9 @@ async def _send_setup(ws, voice: str, target_lang: str, model: str):
 
 
 async def _generate_segment(ws, text: str, duration: float = 0) -> bytes:
-    if duration > 0:
-        prompt = f"[Speak this line in {duration:.1f} seconds, be concise]: {text}"
-    else:
-        prompt = text
     msg = {
         "clientContent": {
-            "turns": [{"role": "user", "parts": [{"text": prompt}]}],
+            "turns": [{"role": "user", "parts": [{"text": text}]}],
             "turnComplete": True,
         }
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import requests
@@ -27,11 +28,6 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
         log.info(f"ep{episode}: identification cached, skipping")
         return load_segments(output_path)
 
-    vocals_path = cache / "vocals.wav"
-    audio_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
-    if not audio_path.exists():
-        raise FileNotFoundError(f"Audio not found. Run download + separate first.")
-
     project = load_project_config(slug)
     global_config = load_global_config()
     characters = load_characters(slug)
@@ -42,14 +38,26 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
     target_lang = project["language"]["target"]
     scenes = _get_scenes(project, episode)
 
-    mime_type = "audio/wav" if audio_path.suffix == ".wav" else "audio/mpeg"
+    transcription_source = global_config.get("transcription", {}).get("source", "audio")
 
-    log.info(f"ep{episode}: uploading audio to Gemini ({audio_path.name})")
-    file_uri = _upload_audio(audio_path, api_key, mime_type)
+    if transcription_source == "video":
+        media_path = cache / "video.mp4"
+        mime_type = "video/mp4"
+    else:
+        vocals_path = cache / "vocals.wav"
+        media_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
+        mime_type = "audio/wav" if media_path.suffix == ".wav" else "audio/mpeg"
 
-    log.info(f"ep{episode}: transcribing + identifying + translating (all-in-one)")
+    if not media_path.exists():
+        raise FileNotFoundError(f"Media not found: {media_path}. Run download first.")
+
+    log.info(f"ep{episode}: uploading {media_path.name} to Gemini (mode={transcription_source})")
+    file_uri = _upload_audio(media_path, api_key, mime_type)
+
+    log.info(f"ep{episode}: transcribing + identifying + translating (all-in-one, source={transcription_source})")
     identified, char_genders = _call_gemini_allinone(
-        file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model
+        file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model,
+        use_subtitle=(transcription_source == "video")
     )
 
     new_chars = _handle_new_characters(slug, identified, characters, char_genders)
@@ -85,18 +93,41 @@ def _upload_audio(audio_path: Path, api_key: str, mime_type: str) -> str:
 
     resp.raise_for_status()
     data = resp.json()
-    return data["file"]["uri"]
+    file_uri = data["file"]["uri"]
+    file_name = data["file"]["name"]
+
+    if mime_type.startswith("video/"):
+        _wait_for_processing(file_name, api_key)
+
+    return file_uri
+
+
+def _wait_for_processing(file_name: str, api_key: str):
+    url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
+    for i in range(30):
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 200:
+            state = resp.json().get("state", "")
+            if state == "ACTIVE":
+                log.info("  video processing complete")
+                return
+            log.info(f"  waiting for video processing... ({state})")
+        time.sleep(5)
+    raise RuntimeError("Video processing timed out after 150s")
 
 
 @retry(max_retries=3)
 def _call_gemini_allinone(
     file_uri: str, mime_type: str, characters: dict,
     scenes: list[dict], source_lang: str, target_lang: str,
-    api_key: str, model: str,
+    api_key: str, model: str, use_subtitle: bool = False,
 ) -> tuple[list[Segment], dict[str, str]]:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
-    prompt = _build_prompt(characters, scenes, source_lang, target_lang)
+    if use_subtitle:
+        prompt = _build_prompt_video(characters, scenes, source_lang, target_lang)
+    else:
+        prompt = _build_prompt(characters, scenes, source_lang, target_lang)
 
     payload = {
         "contents": [{
@@ -120,16 +151,26 @@ def _call_gemini_allinone(
 
     char_genders = {}
     segments = []
-    for i, r in enumerate(results):
+    idx = 0
+    for r in results:
+        start = float(r["start"])
+        end = float(r["end"])
+        duration = end - start
+
+        if duration > 15.0 or duration <= 0:
+            log.debug(f"  filtered segment with bad duration ({duration:.1f}s): {r.get('original', '')[:30]}")
+            continue
+
         seg = Segment(
-            index=i,
-            start=float(r["start"]),
-            end=float(r["end"]),
+            index=idx,
+            start=start,
+            end=end,
             text=r.get("original", ""),
             character=r.get("character", "Unknown"),
             translation=r.get("translation", ""),
         )
         segments.append(seg)
+        idx += 1
         gender = r.get("gender", "male")
         if seg.character not in char_genders:
             char_genders[seg.character] = gender
@@ -187,6 +228,59 @@ SPEAKER IDENTIFICATION:
 
 Return a JSON array sorted by start time:
 [{{"start": 29.8, "end": 30.9, "original": "original text", "character": "Speaker_1", "gender": "female", "translation": "translated text"}}]
+
+Return ONLY the JSON array. No other text."""
+
+
+def _build_prompt_video(characters: dict, scenes: list[dict], source_lang: str, target_lang: str) -> str:
+    lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
+    source_name = lang_names.get(source_lang, source_lang)
+    target_name = lang_names.get(target_lang, target_lang)
+
+    char_list = characters.get("characters", {})
+    char_desc = ""
+    for name, info in char_list.items():
+        aliases = ", ".join(info.get("aliases", []))
+        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
+
+    scene_desc = ""
+    for s in scenes:
+        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+
+    return f"""You are a professional dubbing assistant. Watch this video carefully and perform ALL of the following tasks:
+
+1. READ SUBTITLES: This video has hardcoded/burned-in subtitles in {source_name}. Read the subtitle text directly from the video frames — this is your PRIMARY source for the original dialogue text. Do NOT transcribe from audio.
+2. TIMESTAMPS: Record the exact time each subtitle appears and disappears on screen (start = subtitle appears, end = subtitle disappears).
+3. IDENTIFY: Determine which character is speaking each line by listening to the voice in the audio AND watching who is on screen.
+4. GENDER: Determine the gender of each speaker from their voice AND visual appearance.
+5. TRANSLATE: Translate each subtitle line from {source_name} to {target_name} for dubbing.
+
+CRITICAL RULES:
+- The subtitle text on screen is the GROUND TRUTH — use it exactly as shown, do not guess or transcribe from audio.
+- Timestamps must match when the subtitle is VISIBLE on screen.
+- Each subtitle appearance = one entry in the output.
+- Do NOT merge multiple subtitle lines into one entry.
+- Do NOT skip any subtitle that appears on screen.
+
+KNOWN CHARACTERS:
+{char_desc}
+
+SCENE CONTEXT:
+{scene_desc}
+
+TRANSLATION RULES:
+- Translate naturally into {target_name} — it must sound like natural spoken dialogue.
+- Keep translations CONCISE — they must be speakable within the same duration as the original subtitle is shown.
+
+SPEAKER IDENTIFICATION:
+- Use voice characteristics (pitch, tone, age) AND visual cues to identify speakers.
+- If a speaker doesn't match any known character, use "Speaker_1", "Speaker_2", etc.
+- Different voices MUST get different speaker names.
+- Male voices (deeper/lower pitch) → gender: "male"
+- Female voices (higher pitch) → gender: "female"
+
+Return a JSON array sorted by start time:
+[{{"start": 29.8, "end": 30.9, "original": "subtitle text from video", "character": "Speaker_1", "gender": "female", "translation": "translated text"}}]
 
 Return ONLY the JSON array. No other text."""
 
