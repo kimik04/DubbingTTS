@@ -1,0 +1,26 @@
+# API Keys (or set GEMINI_API_KEY environment variable)
+gemini_api_key: "your-gemini-api-key-here"
+
+# Models
+models:
+  whisper: "mlx-community/whisper-small-mlx"
+  transcribe: "gemini-2.5-flash-lite"
+  tts: "gemini-3.1-flash-live-preview"
+
+# Audio settings
+audio:
+  sample_rate: 24000
+  max_speed: 2.0
+  bg_volume: 1.0
+  dub_volume: 0.7
+
+# Paths
+paths:
+  output: "./output"
+  cache: "./cache"
+  links_file: "./links.txt"
+
+# Demucs
+demucs:
+  model: "htdemucs"
+  two_stems: true

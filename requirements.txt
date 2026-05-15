@@ -1,0 +1,7 @@
+mlx-whisper; sys_platform == "darwin" and platform_machine == "arm64"
+openai-whisper; sys_platform != "darwin" or platform_machine != "arm64"
+websockets
+requests
+pyyaml
+yt-dlp
+demucs

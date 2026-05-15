@@ -1,0 +1,28 @@
+# Config with API keys
+config.yaml
+
+# Cache and output
+projects/*/cache/
+projects/*/output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Internal docs
+PROMPT.md
+CLAUDE.md

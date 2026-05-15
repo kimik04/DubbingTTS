@@ -1,0 +1,54 @@
+characters:
+  Adrian:
+    voice: "Puck"
+    gender: "male"
+    description: "Male lead, young CEO, calm and commanding voice"
+    aliases: ["谢少", "席总", "谢家大少", "四少"]
+    first_seen: "ep1"
+
+  Chloe:
+    voice: "Aoede"
+    gender: "female"
+    description: "Female lead, butcher girl, energetic/brave/loud voice"
+    aliases: ["陆小秋"]
+    first_seen: "ep1"
+
+  Asisten:
+    voice: "Fenrir"
+    gender: "male"
+    description: "Adrian's male assistant/secretary, polite and formal"
+    aliases: []
+    first_seen: "ep1"
+
+  Villain:
+    voice: "Zephyr"
+    gender: "female"
+    description: "Female antagonist, scheming and cruel, older female voice"
+    aliases: ["诛婆龙", "女反派"]
+    first_seen: "ep1"
+
+  Pedagang:
+    voice: "Charon"
+    gender: "male"
+    description: "Market vendors, casual male voices"
+    aliases: []
+    first_seen: "ep1"
+
+  Ibu:
+    voice: "Kore"
+    gender: "female"
+    description: "Mother/older woman, warm maternal tone"
+    aliases: []
+    first_seen: "ep1"
+
+episodes:
+  ep1:
+    scenes:
+      - time: "0:00-1:20"
+        description: "Villain captured Adrian. She taunts him. Chloe bursts in to rescue."
+      - time: "1:20-1:40"
+        description: "Adrian begs Chloe to stay. Chloe negotiates (she has power)."
+      - time: "2:00-2:20"
+        description: "Asisten reports to Adrian about finding the woman from last night."
+      - time: "2:30-3:30"
+        description: "Market scene. Pedagang gossip. Asisten presents dossier. Chloe sells meat."
