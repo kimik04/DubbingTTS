@@ -146,7 +146,7 @@ def cmd_projects(args):
 
 
 def cmd_dub(args):
-    from .downloader import download_episode, download_all
+    from .downloader import download_episode, download_all, separate_audio
     from .transcriber import transcribe_episode
     from .character_id import identify_episode
     from .tts_engine import generate_tts_episode_sync
@@ -170,6 +170,7 @@ def cmd_dub(args):
     for ep_num, url in episodes:
         log.info(f"=== Episode {ep_num} ===")
         download_episode(slug, ep_num, url, force=args.force)
+        separate_audio(slug, ep_num, force=args.force)
         transcribe_episode(slug, ep_num, force=args.force)
         identify_episode(slug, ep_num, force=args.force)
         generate_tts_episode_sync(slug, ep_num, force=args.force)

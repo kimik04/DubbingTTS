@@ -19,9 +19,13 @@ def transcribe_episode(slug: str, episode: int, force: bool = False) -> list[Seg
         log.info(f"ep{episode}: whisper cached, skipping")
         return load_segments(output_path)
 
-    audio_path = cache / "audio.mp3"
+    vocals_path = cache / "vocals.wav"
+    if vocals_path.exists():
+        audio_path = vocals_path
+    else:
+        audio_path = cache / "audio.mp3"
     if not audio_path.exists():
-        raise FileNotFoundError(f"Audio not found: {audio_path}. Run download first.")
+        raise FileNotFoundError(f"Audio not found. Run download + separate first.")
 
     project = load_project_config(slug)
     global_config = load_global_config()

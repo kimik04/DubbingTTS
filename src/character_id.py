@@ -32,9 +32,11 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
     if not whisper_path.exists():
         raise FileNotFoundError(f"Whisper segments not found: {whisper_path}. Run transcribe first.")
 
-    audio_path = cache / "audio.mp3"
+    # Use vocals.wav for better speaker identification
+    vocals_path = cache / "vocals.wav"
+    audio_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
     if not audio_path.exists():
-        raise FileNotFoundError(f"Audio not found: {audio_path}. Run download first.")
+        raise FileNotFoundError(f"Audio not found. Run download + separate first.")
 
     segments = load_segments(whisper_path)
     project = load_project_config(slug)
@@ -47,15 +49,17 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
     target_lang = project["language"]["target"]
     scenes = _get_scenes(project, episode)
 
-    log.info(f"ep{episode}: uploading audio to Gemini")
-    file_uri = _upload_audio(audio_path, api_key)
+    mime_type = "audio/wav" if audio_path.suffix == ".wav" else "audio/mpeg"
+
+    log.info(f"ep{episode}: uploading audio to Gemini ({audio_path.name})")
+    file_uri = _upload_audio(audio_path, api_key, mime_type)
 
     log.info(f"ep{episode}: identifying characters + translating")
-    identified = _call_gemini_identify(
-        file_uri, segments, characters, scenes, source_lang, target_lang, api_key, model
+    identified, char_genders = _call_gemini_identify(
+        file_uri, mime_type, segments, characters, scenes, source_lang, target_lang, api_key, model
     )
 
-    new_chars = _handle_new_characters(slug, identified, characters)
+    new_chars = _handle_new_characters(slug, identified, characters, char_genders)
     if new_chars:
         log.info(f"ep{episode}: added {len(new_chars)} new characters: {new_chars}")
 
@@ -71,15 +75,15 @@ def _get_scenes(project: dict, episode: int) -> list[dict]:
 
 
 @retry(max_retries=3)
-def _upload_audio(audio_path: Path, api_key: str) -> str:
+def _upload_audio(audio_path: Path, api_key: str, mime_type: str) -> str:
     url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
 
     file_size = audio_path.stat().st_size
     headers = {
         "X-Goog-Upload-Command": "start, upload, finalize",
         "X-Goog-Upload-Header-Content-Length": str(file_size),
-        "X-Goog-Upload-Header-Content-Type": "audio/mpeg",
-        "Content-Type": "audio/mpeg",
+        "X-Goog-Upload-Header-Content-Type": mime_type,
+        "Content-Type": mime_type,
     }
 
     with open(audio_path, "rb") as f:
@@ -92,10 +96,10 @@ def _upload_audio(audio_path: Path, api_key: str) -> str:
 
 @retry(max_retries=3)
 def _call_gemini_identify(
-    file_uri: str, segments: list[Segment], characters: dict,
+    file_uri: str, mime_type: str, segments: list[Segment], characters: dict,
     scenes: list[dict], source_lang: str, target_lang: str,
     api_key: str, model: str,
-) -> list[Segment]:
+) -> tuple[list[Segment], dict[str, str]]:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
     prompt = _build_prompt(segments, characters, scenes, source_lang, target_lang)
@@ -103,7 +107,7 @@ def _call_gemini_identify(
     payload = {
         "contents": [{
             "parts": [
-                {"fileData": {"mimeType": "audio/mpeg", "fileUri": file_uri}},
+                {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
                 {"text": prompt},
             ]
         }],
@@ -120,18 +124,22 @@ def _call_gemini_identify(
     text = data["candidates"][0]["content"]["parts"][0]["text"]
     results = json.loads(text)
 
+    char_genders = {}
     identified = []
     for seg in segments:
         match = next((r for r in results if r["index"] == seg.index), None)
         if match:
             seg.character = match.get("character", "Unknown")
             seg.translation = match.get("translation", seg.text)
+            gender = match.get("gender", "male")
+            if seg.character not in char_genders:
+                char_genders[seg.character] = gender
         else:
             seg.character = "Unknown"
             seg.translation = seg.text
         identified.append(seg)
 
-    return identified
+    return identified, char_genders
 
 
 def _build_prompt(segments: list[Segment], characters: dict, scenes: list[dict], source_lang: str, target_lang: str) -> str:
@@ -155,7 +163,7 @@ def _build_prompt(segments: list[Segment], characters: dict, scenes: list[dict],
 
     return f"""You are a dubbing assistant. Listen to the audio and analyze the transcript segments below.
 
-For each segment, identify which character is speaking and translate the text from {source_name} to {target_name}.
+For each segment, identify which character is speaking, determine their gender from their voice, and translate the text from {source_name} to {target_name}.
 
 KNOWN CHARACTERS:
 {char_desc}
@@ -167,19 +175,22 @@ TRANSCRIPT SEGMENTS:
 {seg_list}
 
 INSTRUCTIONS:
-1. Listen to the audio to identify speakers by voice characteristics (gender, tone, age).
-2. Use the scene context and character aliases to help identify speakers.
-3. Translate each segment naturally into {target_name} (not literal, make it sound natural for dubbing).
-4. If a speaker doesn't match any known character, use "Unknown_1", "Unknown_2", etc.
-5. Keep translations concise - they need to fit the original timing for dubbing.
+1. Listen to the audio carefully to identify speakers by voice characteristics (gender, tone, age, pitch).
+2. IMPORTANT: Determine the gender of each speaker from their VOICE in the audio. Male voices are deeper/lower pitch. Female voices are higher pitch.
+3. Use the scene context and character aliases to help identify speakers.
+4. Translate each segment naturally into {target_name} (not literal, make it sound natural for dubbing).
+5. If a speaker doesn't match any known character, use "Unknown_1", "Unknown_2", etc. Give different names to different speakers.
+6. Keep translations concise - they need to fit the original timing for dubbing.
 
 Return a JSON array with this format:
-[{{"index": 0, "character": "CharacterName", "translation": "translated text"}}]
+[{{"index": 0, "character": "CharacterName", "gender": "male", "translation": "translated text"}}]
+
+The "gender" field MUST be either "male" or "female" based on the actual voice you hear in the audio.
 
 Return ONLY the JSON array, no other text."""
 
 
-def _handle_new_characters(slug: str, segments: list[Segment], characters: dict) -> list[str]:
+def _handle_new_characters(slug: str, segments: list[Segment], characters: dict, char_genders: dict) -> list[str]:
     char_list = characters.get("characters", {})
     used_voices = {info.get("voice") for info in char_list.values()}
     new_chars = []
@@ -187,23 +198,27 @@ def _handle_new_characters(slug: str, segments: list[Segment], characters: dict)
     for seg in segments:
         if not seg.character or seg.character in char_list:
             continue
-        if seg.character.startswith("Unknown"):
-            gender = "male"
-            pool = [v for v in AVAILABLE_VOICES[gender] if v not in used_voices]
-            if not pool:
-                pool = [v for v in AVAILABLE_VOICES["female"] if v not in used_voices]
-            if not pool:
-                continue
-            voice = pool[0]
-            used_voices.add(voice)
-            char_list[seg.character] = {
-                "voice": voice,
-                "gender": gender,
-                "description": "Auto-detected character",
-                "aliases": [],
-                "first_seen": f"ep{seg.index}",
-            }
-            new_chars.append(seg.character)
+        if seg.character in [c for c in new_chars]:
+            continue
+
+        gender = char_genders.get(seg.character, "male")
+        pool = [v for v in AVAILABLE_VOICES[gender] if v not in used_voices]
+        if not pool:
+            other = "female" if gender == "male" else "male"
+            pool = [v for v in AVAILABLE_VOICES[other] if v not in used_voices]
+        if not pool:
+            continue
+
+        voice = pool[0]
+        used_voices.add(voice)
+        char_list[seg.character] = {
+            "voice": voice,
+            "gender": gender,
+            "description": f"Auto-detected {gender} character",
+            "aliases": [],
+            "first_seen": f"ep1",
+        }
+        new_chars.append(seg.character)
 
     if new_chars:
         characters["characters"] = char_list

@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from .utils import get_cache_dir, load_project_config, parse_links, retry
+from .utils import get_cache_dir, load_project_config, load_global_config, parse_links, retry
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,47 @@ def download_episode(slug: str, episode: int, url: str, force: bool = False) -> 
     _extract_audio(video_path, audio_path)
 
     return video_path, audio_path
+
+
+def separate_audio(slug: str, episode: int, force: bool = False) -> tuple[Path, Path]:
+    """Run demucs to separate vocals from background. Returns (vocals_path, no_vocals_path)."""
+    cache = get_cache_dir(slug, episode)
+    audio_path = cache / "audio.mp3"
+    vocals_path = cache / "vocals.wav"
+    no_vocals_path = cache / "no_vocals.wav"
+
+    if not force and vocals_path.exists() and no_vocals_path.exists():
+        log.info(f"ep{episode}: demucs cached, skipping separation")
+        return vocals_path, no_vocals_path
+
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio not found: {audio_path}. Run download first.")
+
+    global_config = load_global_config()
+    demucs_model = global_config.get("demucs", {}).get("model", "htdemucs")
+
+    log.info(f"ep{episode}: separating vocals with demucs")
+    demucs_out = cache / "demucs"
+    demucs_out.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "demucs",
+        "--two-stems", "vocals",
+        "-n", demucs_model,
+        "-o", str(demucs_out),
+        str(audio_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+    stem_name = audio_path.stem
+    src_vocals = demucs_out / demucs_model / stem_name / "vocals.wav"
+    src_no_vocals = demucs_out / demucs_model / stem_name / "no_vocals.wav"
+
+    shutil.copy2(src_vocals, vocals_path)
+    shutil.copy2(src_no_vocals, no_vocals_path)
+
+    log.info(f"ep{episode}: separation done")
+    return vocals_path, no_vocals_path
 
 
 @retry(max_retries=3)

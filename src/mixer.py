@@ -62,6 +62,11 @@ def mix_episode(slug: str, episode: int, force: bool = False) -> Path:
 
 
 def _get_background_audio(audio_path: Path, cache: Path, global_config: dict) -> Path:
+    no_vocals = cache / "no_vocals.wav"
+    if no_vocals.exists():
+        log.info(f"  using pre-separated background: {no_vocals}")
+        return no_vocals
+
     demucs_model = global_config.get("demucs", {}).get("model", "htdemucs")
     stem_name = audio_path.stem
 
@@ -75,23 +80,7 @@ def _get_background_audio(audio_path: Path, cache: Path, global_config: dict) ->
             log.info(f"  using cached demucs output: {p}")
             return p
 
-    log.info("  running demucs separation")
-    output_dir = cache / "demucs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        sys.executable, "-m", "demucs",
-        "--two-stems", "vocals",
-        "-n", demucs_model,
-        "-o", str(output_dir),
-        str(audio_path),
-    ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
-
-    result = output_dir / demucs_model / stem_name / "no_vocals.wav"
-    if not result.exists():
-        raise FileNotFoundError(f"Demucs output not found: {result}")
-    return result
+    raise FileNotFoundError("no_vocals.wav not found. Run 'separate' step first.")
 
 
 def _get_video_duration(video_path: Path) -> float:
