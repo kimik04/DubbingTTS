@@ -112,7 +112,7 @@ async def _generate_character_tts(
             slot_duration = seg.end_sec - seg.start_sec
             for attempt in range(3):
                 try:
-                    pcm = await _generate_segment(ws, seg.translation)
+                    pcm = await _generate_segment(ws, seg.translation, slot_duration)
                     if not pcm:
                         raise RuntimeError("Empty audio response")
                     _pcm_to_wav(pcm, wav_path, sample_rate)
@@ -166,7 +166,7 @@ async def _send_setup(ws, voice: str, target_lang: str, model: str):
                 }
             },
             "systemInstruction": {
-                "parts": [{"text": f"You are a professional voice dubbing actor. RESPOND IN {target_lang.upper()}. YOU MUST RESPOND UNMISTAKABLY IN {target_lang.upper()}. Speak naturally and expressively with appropriate emotion."}]
+                "parts": [{"text": f"RESPOND IN {target_lang.upper()}. YOU MUST RESPOND UNMISTAKABLY IN {target_lang.upper()}. You are a voice dubbing actor. Speak quickly and efficiently. Match your speech duration to the time limit given. If told to speak in 2 seconds, compress your delivery to fit exactly 2 seconds."}]
             },
             "contextWindowCompression": {
                 "slidingWindow": {}
@@ -182,10 +182,14 @@ async def _send_setup(ws, voice: str, target_lang: str, model: str):
         raise RuntimeError(f"Setup failed: {data}")
 
 
-async def _generate_segment(ws, text: str) -> bytes:
+async def _generate_segment(ws, text: str, slot_duration: float = 0) -> bytes:
+    if slot_duration > 0:
+        prompt = f"[{slot_duration:.0f} detik] {text}"
+    else:
+        prompt = text
     msg = {
         "clientContent": {
-            "turns": [{"role": "user", "parts": [{"text": text}]}],
+            "turns": [{"role": "user", "parts": [{"text": prompt}]}],
             "turnComplete": True,
         }
     }
