@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import subprocess
+import time
 import wave
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import websockets
 
 from .utils import (
     Segment, get_cache_dir, load_project_config, load_global_config,
-    load_characters, load_segments, retry_async,
+    load_characters, load_segments,
 )
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ async def generate_tts_episode(slug: str, episode: int, character_filter: str | 
         log.info(f"ep{episode}: TTS for {character} ({len(segs)} segments, voice={voice})")
         paths = await _generate_character_tts(
             character, voice, segs, target_lang, tts_dir,
-            sample_rate, max_speed, api_key, model,force
+            sample_rate, max_speed, api_key, model, force
         )
         results[character] = paths
 
@@ -97,33 +98,38 @@ async def _generate_character_tts(
 
         for seg, wav_path in pending:
             slot_duration = seg.end_sec - seg.start_sec
-            try:
-                pcm = await _generate_segment(ws, seg.translation, slot_duration)
-                _pcm_to_wav(pcm, wav_path, sample_rate)
-                _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
-            except Exception as e:
-                log.warning(f"  {character} seg_{seg.index}: failed ({e}), reconnecting")
+            for attempt in range(3):
                 try:
-                    await ws.close()
-                except:
-                    pass
-                ws = await _connect_ws(api_key, model)
-                await _send_setup(ws, voice, target_name, model)
-                try:
-                    pcm = await _generate_segment(ws, seg.translation, slot_duration)
+                    pcm = await _generate_segment(ws, seg.translation)
+                    if not pcm:
+                        raise RuntimeError("Empty audio response")
                     _pcm_to_wav(pcm, wav_path, sample_rate)
                     _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
-                except Exception as e2:
-                    log.error(f"  {character} seg_{seg.index}: failed after retry ({e2})")
+                    break
+                except (websockets.exceptions.ConnectionClosed, RuntimeError, asyncio.TimeoutError) as e:
+                    if attempt == 2:
+                        log.error(f"  {character} seg_{seg.index}: failed after 3 attempts ({e})")
+                        break
+                    log.warning(f"  {character} seg_{seg.index}: failed ({e}), reconnecting...")
+                    await asyncio.sleep(2)
+                    try:
+                        await ws.close()
+                    except:
+                        pass
+                    ws = await _connect_ws(api_key, model)
+                    await _send_setup(ws, voice, target_name, model)
     finally:
-        await ws.close()
+        try:
+            await ws.close()
+        except:
+            pass
 
     return paths
 
 
 async def _connect_ws(api_key: str, model: str):
     url = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={api_key}"
-    ws = await websockets.connect(url, max_size=None)
+    ws = await websockets.connect(url, max_size=None, ping_interval=20, ping_timeout=10)
     return ws
 
 
@@ -140,19 +146,23 @@ async def _send_setup(ws, voice: str, target_lang: str, model: str):
                 }
             },
             "systemInstruction": {
-                "parts": [{"text": f"You are a professional voice dubbing actor. Dub the following lines into {target_lang}. Speak naturally and expressively with appropriate emotion."}]
-            }
+                "parts": [{"text": f"You are a professional voice dubbing actor. RESPOND IN {target_lang.upper()}. YOU MUST RESPOND UNMISTAKABLY IN {target_lang.upper()}. Speak naturally and expressively with appropriate emotion."}]
+            },
+            "contextWindowCompression": {
+                "slidingWindow": {}
+            },
+            "sessionResumption": {}
         }
     }
     await ws.send(json.dumps(setup_msg))
 
-    resp = await asyncio.wait_for(ws.recv(), timeout=10)
+    resp = await asyncio.wait_for(ws.recv(), timeout=15)
     data = json.loads(resp)
     if "setupComplete" not in data:
         raise RuntimeError(f"Setup failed: {data}")
 
 
-async def _generate_segment(ws, text: str, duration: float = 0) -> bytes:
+async def _generate_segment(ws, text: str) -> bytes:
     msg = {
         "clientContent": {
             "turns": [{"role": "user", "parts": [{"text": text}]}],
@@ -166,11 +176,17 @@ async def _generate_segment(ws, text: str, duration: float = 0) -> bytes:
         resp = await asyncio.wait_for(ws.recv(), timeout=30)
         data = json.loads(resp)
 
+        if "goAway" in data:
+            raise RuntimeError("Session GoAway received, need reconnect")
+
         server_content = data.get("serverContent")
         if not server_content:
             continue
 
         if server_content.get("turnComplete"):
+            break
+
+        if server_content.get("interrupted"):
             break
 
         parts = server_content.get("modelTurn", {}).get("parts", [])

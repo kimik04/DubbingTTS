@@ -20,6 +20,13 @@ AVAILABLE_VOICES = {
 }
 
 
+def _normalize_gender(g: str) -> str:
+    g = g.lower().strip()
+    if g in ("female", "perempuan", "wanita", "f"):
+        return "female"
+    return "male"
+
+
 def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segment]:
     cache = get_cache_dir(slug, episode)
     output_path = cache / "identified_segments.json"
@@ -106,17 +113,8 @@ def _upload_file(file_path: Path, api_key: str, mime_type: str) -> str:
 
 
 def _wait_for_processing(file_name: str, api_key: str):
-    url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
-    for i in range(30):
-        resp = requests.get(url, timeout=30)
-        if resp.status_code == 200:
-            state = resp.json().get("state", "")
-            if state == "ACTIVE":
-                log.info("  video processing complete")
-                return
-            log.info(f"  waiting for video processing... ({state})")
-        time.sleep(5)
-    raise RuntimeError("Video processing timed out after 150s")
+    log.info("  waiting 20s for video processing...")
+    time.sleep(20)
 
 
 @retry()
@@ -136,11 +134,23 @@ def _single_pass_video(file_uri, characters, scenes, source_lang, target_lang, a
     for s in scenes:
         scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
 
-    prompt = f"""Watch and listen to this video. It has hardcoded {source_name} subtitles.
+    prompt = f"""Watch and listen to this video carefully.
 
-For each spoken line: use the subtitle as text source, timestamp (MM:SS) from when you HEAR the speech, identify speaker by voice and appearance, detect emotion, and translate concisely into {target_name} for dubbing.
+Your task is to produce a transcription for voice dubbing. For each spoken line:
+- Determine the TIMESTAMP (MM:SS) from when you HEAR the person speaking in the audio. Mark the moment speech begins.
+- Transcribe what is said by listening to the audio.
+- Identify the speaker by their voice characteristics and visual appearance (who is on screen, lip movement).
+- Detect the emotion from the tone of voice.
+- Translate into {target_name} naturally for dubbing. Keep translations concise — they should be speakable in roughly the same duration as the original speech.
+- Each spoken line = one segment. Do NOT merge lines. Do NOT skip any spoken line.
 
-{char_desc}{scene_desc}Provide a brief summary at the beginning."""
+KNOWN CHARACTERS:
+{char_desc}
+
+SCENE CONTEXT:
+{scene_desc}
+
+Provide a brief summary at the beginning."""
 
     url = f"https://generativelanguage.googleapis.com/v1alpha/models/{model}:generateContent?key={api_key}"
 
@@ -190,9 +200,16 @@ For each spoken line: use the subtitle as text source, timestamp (MM:SS) from wh
     text = data["candidates"][0]["content"]["parts"][0]["text"]
     result = json.loads(text)
 
+    return _parse_segments(result)
+
+
+def _parse_segments(result: dict) -> tuple[list[Segment], dict]:
+    from .utils import parse_timestamp
+
     raw_segments = result.get("segments", [])
     char_genders = {}
     segments = []
+    prev_translation = ""
 
     for i, seg in enumerate(raw_segments):
         start_ts = seg["timestamp"]
@@ -203,11 +220,29 @@ For each spoken line: use the subtitle as text source, timestamp (MM:SS) from wh
 
         emotion = seg.get("emotion", "neutral")
         translation = seg.get("translation", seg.get("content", ""))
+
+        if translation == prev_translation and translation:
+            continue
+        prev_translation = translation
+
         if emotion != "neutral":
             translation = f"[{emotion}] {translation}"
 
+        start_sec = parse_timestamp(start_ts)
+        end_sec = parse_timestamp(end_ts)
+        slot = end_sec - start_sec
+
+        if slot > 8.0:
+            end_sec = start_sec + 5.0
+            m, s = divmod(int(end_sec), 60)
+            end_ts = f"{m:02d}:{s:02d}"
+        elif slot <= 0:
+            end_sec = start_sec + 3.0
+            m, s = divmod(int(end_sec), 60)
+            end_ts = f"{m:02d}:{s:02d}"
+
         character = seg.get("speaker", "Unknown")
-        gender = seg.get("gender", "male")
+        gender = _normalize_gender(seg.get("gender", "male"))
 
         s = Segment(
             index=len(segments),
@@ -323,7 +358,7 @@ Provide a brief summary at the beginning."""
             translation = f"[{emotion}] {translation}"
 
         character = seg.get("speaker", "Unknown")
-        gender = seg.get("gender", "male")
+        gender = _normalize_gender(seg.get("gender", "male"))
 
         s = Segment(
             index=len(segments),
