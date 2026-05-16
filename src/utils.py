@@ -14,11 +14,23 @@ PROJECT_ROOT = Path(__file__).parent.parent
 @dataclass
 class Segment:
     index: int
-    start: float
-    end: float
+    start: str
+    end: str
     text: str
     character: Optional[str] = None
     translation: Optional[str] = None
+
+    @property
+    def start_sec(self) -> float:
+        return parse_timestamp(self.start)
+
+    @property
+    def end_sec(self) -> float:
+        return parse_timestamp(self.end)
+
+    @property
+    def duration(self) -> float:
+        return self.end_sec - self.start_sec
 
     def to_dict(self):
         return asdict(self)
@@ -107,7 +119,7 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def retry(max_retries=3, backoff_base=2.0, retryable_exceptions=(Exception,)):
+def retry(max_retries=5, backoff_base=15.0, retryable_exceptions=(Exception,)):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -117,9 +129,9 @@ def retry(max_retries=3, backoff_base=2.0, retryable_exceptions=(Exception,)):
                 except retryable_exceptions as e:
                     if attempt == max_retries:
                         raise
-                    wait = backoff_base ** attempt
+                    wait = backoff_base
                     logging.getLogger(__name__).warning(
-                        f"{func.__name__} failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait:.1f}s"
+                        f"{func.__name__} failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait:.0f}s"
                     )
                     time.sleep(wait)
         return wrapper

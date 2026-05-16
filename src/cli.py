@@ -186,7 +186,7 @@ def cmd_identify(args):
     segments = identify_episode(args.project, args.episode, force=args.force)
     print(f"Identified {len(segments)} segments")
     for s in segments:
-        print(f"  [{s.start:.1f}-{s.end:.1f}] {s.character}: {s.translation}")
+        print(f"  [{s.start}-{s.end}] {s.character}: {s.translation}")
 
 
 def cmd_tts(args):

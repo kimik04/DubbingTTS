@@ -41,24 +41,27 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
     transcription_source = global_config.get("transcription", {}).get("source", "audio")
 
     if transcription_source == "video":
-        media_path = cache / "video.mp4"
-        mime_type = "video/mp4"
+        video_path = cache / "video.mp4"
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video not found: {video_path}")
+        log.info(f"ep{episode}: uploading video.mp4 to Gemini")
+        file_uri = _upload_file(video_path, api_key, "video/mp4")
+        log.info(f"ep{episode}: single-pass video (subtitle + audio + timestamp)")
+        identified, char_genders = _single_pass_video(
+            file_uri, characters, scenes, source_lang, target_lang, api_key, model
+        )
     else:
         vocals_path = cache / "vocals.wav"
-        media_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
-        mime_type = "audio/wav" if media_path.suffix == ".wav" else "audio/mpeg"
-
-    if not media_path.exists():
-        raise FileNotFoundError(f"Media not found: {media_path}. Run download first.")
-
-    log.info(f"ep{episode}: uploading {media_path.name} to Gemini (mode={transcription_source})")
-    file_uri = _upload_audio(media_path, api_key, mime_type)
-
-    log.info(f"ep{episode}: transcribing + identifying + translating (all-in-one, source={transcription_source})")
-    identified, char_genders = _call_gemini_allinone(
-        file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model,
-        use_subtitle=(transcription_source == "video")
-    )
+        audio_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio not found. Run download + separate first.")
+        audio_mime = "audio/wav" if audio_path.suffix == ".wav" else "audio/mpeg"
+        log.info(f"ep{episode}: uploading {audio_path.name} to Gemini")
+        file_uri = _upload_file(audio_path, api_key, audio_mime)
+        log.info(f"ep{episode}: single-pass audio")
+        identified, char_genders = _single_pass_audio(
+            file_uri, audio_mime, characters, scenes, source_lang, target_lang, api_key, model
+        )
 
     new_chars = _handle_new_characters(slug, identified, characters, char_genders)
     if new_chars:
@@ -77,10 +80,10 @@ def _get_scenes(project: dict, episode: int) -> list[dict]:
 
 
 @retry(max_retries=3)
-def _upload_audio(audio_path: Path, api_key: str, mime_type: str) -> str:
+def _upload_file(file_path: Path, api_key: str, mime_type: str) -> str:
     url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
 
-    file_size = audio_path.stat().st_size
+    file_size = file_path.stat().st_size
     headers = {
         "X-Goog-Upload-Command": "start, upload, finalize",
         "X-Goog-Upload-Header-Content-Length": str(file_size),
@@ -88,8 +91,8 @@ def _upload_audio(audio_path: Path, api_key: str, mime_type: str) -> str:
         "Content-Type": mime_type,
     }
 
-    with open(audio_path, "rb") as f:
-        resp = requests.post(url, headers=headers, data=f, timeout=120)
+    with open(file_path, "rb") as f:
+        resp = requests.post(url, headers=headers, data=f, timeout=180)
 
     resp.raise_for_status()
     data = resp.json()
@@ -117,68 +120,125 @@ def _wait_for_processing(file_name: str, api_key: str):
 
 
 @retry(max_retries=3)
-def _call_gemini_allinone(
-    file_uri: str, mime_type: str, characters: dict,
-    scenes: list[dict], source_lang: str, target_lang: str,
-    api_key: str, model: str, use_subtitle: bool = False,
-) -> tuple[list[Segment], dict[str, str]]:
+def _single_pass_video(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
+    """Single pass: video with hardcoded subtitles. Uses native Gemini timestamp format."""
+    lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
+    source_name = lang_names.get(source_lang, source_lang)
+    target_name = lang_names.get(target_lang, target_lang)
+
+    char_list = characters.get("characters", {})
+    char_desc = ""
+    for name, info in char_list.items():
+        aliases = ", ".join(info.get("aliases", []))
+        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
+
+    scene_desc = ""
+    for s in scenes:
+        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+
+    prompt = f"""Process this video and generate a detailed transcription.
+This video has hardcoded subtitles in {source_name}. Read the subtitle text from the video frames as the ground truth.
+
+Requirements:
+1. Identify distinct speakers by voice and visual appearance.
+2. Provide accurate timestamps for each segment (Format: MM:SS).
+3. Detect the primary language of each segment.
+4. Identify the primary emotion: happy, sad, angry, or neutral.
+5. For each segment, also provide a translation into {target_name} that sounds natural for voice dubbing. Keep translations concise.
+
+KNOWN CHARACTERS:
+{char_desc}
+
+SCENE CONTEXT:
+{scene_desc}
+
+Provide a brief summary at the beginning."""
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
-    if use_subtitle:
-        prompt = _build_prompt_video(characters, scenes, source_lang, target_lang)
-    else:
-        prompt = _build_prompt(characters, scenes, source_lang, target_lang)
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "segments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "speaker": {"type": "string"},
+                        "timestamp": {"type": "string"},
+                        "content": {"type": "string"},
+                        "translation": {"type": "string"},
+                        "language": {"type": "string"},
+                        "gender": {"type": "string"},
+                        "emotion": {
+                            "type": "string",
+                            "enum": ["happy", "sad", "angry", "neutral"]
+                        }
+                    },
+                    "required": ["speaker", "timestamp", "content", "translation", "gender", "emotion"]
+                }
+            }
+        },
+        "required": ["summary", "segments"]
+    }
 
     payload = {
-        "contents": [{
-            "parts": [
-                {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
-                {"text": prompt},
-            ]
-        }],
+        "contents": [{"parts": [
+            {"fileData": {"mimeType": "video/mp4", "fileUri": file_uri}},
+            {"text": prompt},
+        ]}],
         "generationConfig": {
             "responseMimeType": "application/json",
+            "responseSchema": response_schema,
             "temperature": 0.1,
         },
     }
 
-    resp = requests.post(url, json=payload, timeout=180)
+    resp = requests.post(url, json=payload, timeout=300)
     resp.raise_for_status()
     data = resp.json()
-
     text = data["candidates"][0]["content"]["parts"][0]["text"]
-    results = json.loads(text)
+    result = json.loads(text)
 
+    raw_segments = result.get("segments", [])
     char_genders = {}
     segments = []
-    idx = 0
-    for r in results:
-        start = float(r["start"])
-        end = float(r["end"])
-        duration = end - start
 
-        if duration > 15.0 or duration <= 0:
-            log.debug(f"  filtered segment with bad duration ({duration:.1f}s): {r.get('original', '')[:30]}")
-            continue
+    for i, seg in enumerate(raw_segments):
+        start_ts = seg["timestamp"]
+        if i + 1 < len(raw_segments):
+            end_ts = raw_segments[i + 1]["timestamp"]
+        else:
+            end_ts = start_ts
 
-        seg = Segment(
-            index=idx,
-            start=start,
-            end=end,
-            text=r.get("original", ""),
-            character=r.get("character", "Unknown"),
-            translation=r.get("translation", ""),
+        emotion = seg.get("emotion", "neutral")
+        translation = seg.get("translation", seg.get("content", ""))
+        if emotion != "neutral":
+            translation = f"[{emotion}] {translation}"
+
+        character = seg.get("speaker", "Unknown")
+        gender = seg.get("gender", "male")
+
+        s = Segment(
+            index=len(segments),
+            start=start_ts,
+            end=end_ts,
+            text=seg.get("content", ""),
+            character=character,
+            translation=translation,
         )
-        segments.append(seg)
-        idx += 1
-        gender = r.get("gender", "male")
-        if seg.character not in char_genders:
-            char_genders[seg.character] = gender
+        segments.append(s)
+
+        if character not in char_genders:
+            char_genders[character] = gender
 
     return segments, char_genders
 
 
-def _build_prompt(characters: dict, scenes: list[dict], source_lang: str, target_lang: str) -> str:
+@retry(max_retries=3)
+def _single_pass_audio(file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model):
+    """Single pass: audio only mode."""
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
     source_name = lang_names.get(source_lang, source_lang)
     target_name = lang_names.get(target_lang, target_lang)
@@ -193,20 +253,14 @@ def _build_prompt(characters: dict, scenes: list[dict], source_lang: str, target
     for s in scenes:
         scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
 
-    return f"""You are a professional dubbing assistant. Listen to this audio carefully and perform ALL of the following tasks:
+    prompt = f"""Process this audio file and generate a detailed transcription.
 
-1. TRANSCRIBE: Detect every spoken line in the audio with precise timestamps (start and end in seconds).
-2. IDENTIFY: Determine which character is speaking each line based on voice characteristics.
-3. GENDER: Determine the gender of each speaker from their voice pitch and tone.
-4. TRANSLATE: Translate each line from {source_name} to {target_name} for dubbing.
-
-IMPORTANT RULES FOR TIMESTAMPS:
-- Timestamps must be PRECISE to the actual moment each line is spoken in the audio.
-- Start time = exact moment the person begins speaking that line.
-- End time = exact moment the person finishes speaking that line.
-- Do NOT overlap timestamps between different lines.
-- Do NOT include silence/pauses in the timestamps.
-- Listen carefully to the audio — accuracy of timestamps is critical for lip-sync dubbing.
+Requirements:
+1. Identify distinct speakers by voice characteristics.
+2. Provide accurate timestamps for each segment (Format: MM:SS).
+3. Detect the primary language of each segment.
+4. Identify the primary emotion: happy, sad, angry, or neutral.
+5. For each segment, also provide a translation into {target_name} that sounds natural for voice dubbing. Keep translations concise.
 
 KNOWN CHARACTERS:
 {char_desc}
@@ -214,75 +268,88 @@ KNOWN CHARACTERS:
 SCENE CONTEXT:
 {scene_desc}
 
-TRANSLATION RULES:
-- Translate naturally into {target_name} — it must sound like natural spoken dialogue, not a literal translation.
-- Keep translations CONCISE — they must fit within the same duration as the original line.
-- Shorter is better. If the original is 1 second, the translation should be speakable in ~1 second.
+Provide a brief summary at the beginning."""
 
-SPEAKER IDENTIFICATION:
-- Use voice characteristics (pitch, tone, age) to identify speakers.
-- If a speaker doesn't match any known character, use "Speaker_1", "Speaker_2", etc.
-- Different voices MUST get different speaker names.
-- Male voices (deeper/lower pitch) → gender: "male"
-- Female voices (higher pitch) → gender: "female"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
-Return a JSON array sorted by start time:
-[{{"start": 29.8, "end": 30.9, "original": "original text", "character": "Speaker_1", "gender": "female", "translation": "translated text"}}]
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "segments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "speaker": {"type": "string"},
+                        "timestamp": {"type": "string"},
+                        "content": {"type": "string"},
+                        "translation": {"type": "string"},
+                        "language": {"type": "string"},
+                        "gender": {"type": "string"},
+                        "emotion": {
+                            "type": "string",
+                            "enum": ["happy", "sad", "angry", "neutral"]
+                        }
+                    },
+                    "required": ["speaker", "timestamp", "content", "translation", "gender", "emotion"]
+                }
+            }
+        },
+        "required": ["summary", "segments"]
+    }
 
-Return ONLY the JSON array. No other text."""
+    payload = {
+        "contents": [{"parts": [
+            {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
+            {"text": prompt},
+        ]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": response_schema,
+            "temperature": 0.1,
+        },
+    }
 
+    resp = requests.post(url, json=payload, timeout=300)
+    resp.raise_for_status()
+    data = resp.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    result = json.loads(text)
 
-def _build_prompt_video(characters: dict, scenes: list[dict], source_lang: str, target_lang: str) -> str:
-    lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
-    source_name = lang_names.get(source_lang, source_lang)
-    target_name = lang_names.get(target_lang, target_lang)
+    raw_segments = result.get("segments", [])
+    char_genders = {}
+    segments = []
 
-    char_list = characters.get("characters", {})
-    char_desc = ""
-    for name, info in char_list.items():
-        aliases = ", ".join(info.get("aliases", []))
-        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
+    for i, seg in enumerate(raw_segments):
+        start_ts = seg["timestamp"]
+        if i + 1 < len(raw_segments):
+            end_ts = raw_segments[i + 1]["timestamp"]
+        else:
+            end_ts = start_ts
 
-    scene_desc = ""
-    for s in scenes:
-        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+        emotion = seg.get("emotion", "neutral")
+        translation = seg.get("translation", seg.get("content", ""))
+        if emotion != "neutral":
+            translation = f"[{emotion}] {translation}"
 
-    return f"""You are a professional dubbing assistant. Watch this video carefully and perform ALL of the following tasks:
+        character = seg.get("speaker", "Unknown")
+        gender = seg.get("gender", "male")
 
-1. READ SUBTITLES: This video has hardcoded/burned-in subtitles in {source_name}. Read the subtitle text directly from the video frames — this is your PRIMARY source for the original dialogue text. Do NOT transcribe from audio.
-2. TIMESTAMPS: Record the exact time each subtitle appears and disappears on screen (start = subtitle appears, end = subtitle disappears).
-3. IDENTIFY: Determine which character is speaking each line by listening to the voice in the audio AND watching who is on screen.
-4. GENDER: Determine the gender of each speaker from their voice AND visual appearance.
-5. TRANSLATE: Translate each subtitle line from {source_name} to {target_name} for dubbing.
+        s = Segment(
+            index=len(segments),
+            start=start_ts,
+            end=end_ts,
+            text=seg.get("content", ""),
+            character=character,
+            translation=translation,
+        )
+        segments.append(s)
 
-CRITICAL RULES:
-- The subtitle text on screen is the GROUND TRUTH — use it exactly as shown, do not guess or transcribe from audio.
-- Timestamps must match when the subtitle is VISIBLE on screen.
-- Each subtitle appearance = one entry in the output.
-- Do NOT merge multiple subtitle lines into one entry.
-- Do NOT skip any subtitle that appears on screen.
+        if character not in char_genders:
+            char_genders[character] = gender
 
-KNOWN CHARACTERS:
-{char_desc}
-
-SCENE CONTEXT:
-{scene_desc}
-
-TRANSLATION RULES:
-- Translate naturally into {target_name} — it must sound like natural spoken dialogue.
-- Keep translations CONCISE — they must be speakable within the same duration as the original subtitle is shown.
-
-SPEAKER IDENTIFICATION:
-- Use voice characteristics (pitch, tone, age) AND visual cues to identify speakers.
-- If a speaker doesn't match any known character, use "Speaker_1", "Speaker_2", etc.
-- Different voices MUST get different speaker names.
-- Male voices (deeper/lower pitch) → gender: "male"
-- Female voices (higher pitch) → gender: "female"
-
-Return a JSON array sorted by start time:
-[{{"start": 29.8, "end": 30.9, "original": "subtitle text from video", "character": "Speaker_1", "gender": "female", "translation": "translated text"}}]
-
-Return ONLY the JSON array. No other text."""
+    return segments, char_genders
 
 
 def _handle_new_characters(slug: str, segments: list[Segment], characters: dict, char_genders: dict) -> list[str]:

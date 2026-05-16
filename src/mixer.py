@@ -122,7 +122,7 @@ def _place_tts_segments(segments, tts_dir: Path, duration: float, sample_rate: i
 
     for i, (seg, wav) in enumerate(tts_files):
         inputs.extend(["-i", str(wav)])
-        delay_ms = int(seg.start * 1000)
+        delay_ms = int(seg.start_sec * 1000)
         filter_parts.append(f"[{i+1}]adelay={delay_ms}|{delay_ms}[d{i}]")
 
     mix_inputs = "[0]" + "".join(f"[d{i}]" for i in range(len(tts_files)))

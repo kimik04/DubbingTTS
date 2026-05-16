@@ -96,10 +96,11 @@ async def _generate_character_tts(
         await _send_setup(ws, voice, target_name, model)
 
         for seg, wav_path in pending:
-            slot_duration = seg.end - seg.start
+            slot_duration = seg.end_sec - seg.start_sec
             try:
                 pcm = await _generate_segment(ws, seg.translation, slot_duration)
                 _pcm_to_wav(pcm, wav_path, sample_rate)
+                _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
             except Exception as e:
                 log.warning(f"  {character} seg_{seg.index}: failed ({e}), reconnecting")
                 try:
@@ -111,6 +112,7 @@ async def _generate_character_tts(
                 try:
                     pcm = await _generate_segment(ws, seg.translation, slot_duration)
                     _pcm_to_wav(pcm, wav_path, sample_rate)
+                    _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
                 except Exception as e2:
                     log.error(f"  {character} seg_{seg.index}: failed after retry ({e2})")
     finally:
