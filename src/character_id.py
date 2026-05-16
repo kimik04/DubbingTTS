@@ -47,16 +47,22 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
 
     transcription_source = global_config.get("transcription", {}).get("source", "audio")
 
-    if transcription_source == "video":
+    if transcription_source in ("video", "subtitle"):
         video_path = cache / "video.mp4"
         if not video_path.exists():
             raise FileNotFoundError(f"Video not found: {video_path}")
-        log.info(f"ep{episode}: uploading video.mp4 to Gemini")
+        log.info(f"ep{episode}: uploading video.mp4 to Gemini (mode={transcription_source})")
         file_uri = _upload_file(video_path, api_key, "video/mp4")
-        log.info(f"ep{episode}: single-pass video (subtitle + audio + timestamp)")
-        identified, char_genders = _single_pass_video(
-            file_uri, characters, scenes, source_lang, target_lang, api_key, model
-        )
+        if transcription_source == "subtitle":
+            log.info(f"ep{episode}: reading hardcoded subtitles (timestamp = subtitle appearance)")
+            identified, char_genders = _single_pass_subtitle(
+                file_uri, characters, scenes, source_lang, target_lang, api_key, model
+            )
+        else:
+            log.info(f"ep{episode}: transcribing from audio+visual (timestamp = speech)")
+            identified, char_genders = _single_pass_video(
+                file_uri, characters, scenes, source_lang, target_lang, api_key, model
+            )
     else:
         vocals_path = cache / "vocals.wav"
         audio_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
@@ -147,6 +153,94 @@ Your task is to produce a transcription for voice dubbing. For each spoken line:
 KNOWN CHARACTERS (YOU MUST REUSE THESE EXACT NAMES if the same character appears):
 {char_desc}
 IMPORTANT: If a speaker matches any known character above, you MUST use that exact name. Only create a new name if the voice is clearly a different person not listed above.
+
+SCENE CONTEXT:
+{scene_desc}
+
+Provide a brief summary at the beginning."""
+
+    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{model}:generateContent?key={api_key}"
+
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "segments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "speaker": {"type": "string"},
+                        "timestamp": {"type": "string"},
+                        "content": {"type": "string"},
+                        "translation": {"type": "string"},
+                        "language": {"type": "string"},
+                        "gender": {"type": "string"},
+                        "emotion": {
+                            "type": "string",
+                            "enum": ["happy", "sad", "angry", "neutral"]
+                        }
+                    },
+                    "required": ["speaker", "timestamp", "content", "translation", "gender", "emotion"]
+                }
+            }
+        },
+        "required": ["summary", "segments"]
+    }
+
+    payload = {
+        "contents": [{"parts": [
+            {"fileData": {"mimeType": "video/mp4", "fileUri": file_uri}},
+            {"text": prompt},
+        ]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": response_schema,
+            "mediaResolution": "media_resolution_high",
+            "thinkingConfig": {"thinkingLevel": "high"},
+        },
+    }
+
+    resp = requests.post(url, json=payload, timeout=300)
+    resp.raise_for_status()
+    data = resp.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    result = json.loads(text)
+
+    return _parse_segments(result)
+
+
+@retry()
+def _single_pass_subtitle(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
+    """Read hardcoded subtitles directly. Timestamp = when subtitle appears on screen."""
+    lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
+    source_name = lang_names.get(source_lang, source_lang)
+    target_name = lang_names.get(target_lang, target_lang)
+
+    char_list = characters.get("characters", {})
+    char_desc = ""
+    for name, info in char_list.items():
+        aliases = ", ".join(info.get("aliases", []))
+        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
+
+    scene_desc = ""
+    for s in scenes:
+        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+
+    prompt = f"""Watch this video carefully. It has hardcoded subtitles in {source_name}.
+
+Your task:
+- Read EVERY subtitle that appears on screen. The subtitle text is the ground truth.
+- For each subtitle, record the TIMESTAMP (MM:SS) of when it APPEARS on screen.
+- Identify the speaker by voice and visual appearance.
+- Detect the emotion from the tone of voice.
+- Translate into {target_name} naturally for dubbing. Keep translations concise.
+- Each subtitle appearance = one segment. Do NOT merge. Do NOT skip any subtitle.
+- IGNORE any existing translated subtitle track — only read the {source_name} subtitle.
+
+KNOWN CHARACTERS (YOU MUST REUSE THESE EXACT NAMES if the same character appears):
+{char_desc}
+IMPORTANT: If a speaker matches any known character above, you MUST use that exact name.
 
 SCENE CONTEXT:
 {scene_desc}
