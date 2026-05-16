@@ -119,7 +119,7 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def retry(max_retries=5, backoff_base=15.0, retryable_exceptions=(Exception,)):
+def retry(max_retries=5, backoff_base=60.0, retryable_exceptions=(Exception,)):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):

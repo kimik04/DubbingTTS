@@ -79,7 +79,7 @@ def _get_scenes(project: dict, episode: int) -> list[dict]:
     return ep_data.get("scenes", [])
 
 
-@retry(max_retries=3)
+@retry()
 def _upload_file(file_path: Path, api_key: str, mime_type: str) -> str:
     url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
 
@@ -119,7 +119,7 @@ def _wait_for_processing(file_name: str, api_key: str):
     raise RuntimeError("Video processing timed out after 150s")
 
 
-@retry(max_retries=3)
+@retry()
 def _single_pass_video(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
     """Single pass: video with hardcoded subtitles. Uses native Gemini timestamp format."""
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
@@ -136,25 +136,13 @@ def _single_pass_video(file_uri, characters, scenes, source_lang, target_lang, a
     for s in scenes:
         scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
 
-    prompt = f"""Process this video and generate a detailed transcription.
-This video has hardcoded subtitles in {source_name}. Read the subtitle text from the video frames as the ground truth.
+    prompt = f"""Watch and listen to this video. It has hardcoded {source_name} subtitles.
 
-Requirements:
-1. Identify distinct speakers by voice and visual appearance.
-2. Provide accurate timestamps for each segment (Format: MM:SS).
-3. Detect the primary language of each segment.
-4. Identify the primary emotion: happy, sad, angry, or neutral.
-5. For each segment, also provide a translation into {target_name} that sounds natural for voice dubbing. Keep translations concise.
+For each spoken line: use the subtitle as text source, timestamp (MM:SS) from when you HEAR the speech, identify speaker by voice and appearance, detect emotion, and translate concisely into {target_name} for dubbing.
 
-KNOWN CHARACTERS:
-{char_desc}
+{char_desc}{scene_desc}Provide a brief summary at the beginning."""
 
-SCENE CONTEXT:
-{scene_desc}
-
-Provide a brief summary at the beginning."""
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{model}:generateContent?key={api_key}"
 
     response_schema = {
         "type": "object",
@@ -191,7 +179,8 @@ Provide a brief summary at the beginning."""
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": response_schema,
-            "temperature": 0.1,
+            "mediaResolution": "media_resolution_high",
+            "thinkingConfig": {"thinkingLevel": "high"},
         },
     }
 
@@ -236,7 +225,7 @@ Provide a brief summary at the beginning."""
     return segments, char_genders
 
 
-@retry(max_retries=3)
+@retry()
 def _single_pass_audio(file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model):
     """Single pass: audio only mode."""
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
