@@ -1,0 +1,56 @@
+characters:
+  Yuna Sanjaya:
+    voice: Aoede
+    gender: female
+    description: Auto-detected female character
+    aliases: []
+    first_seen: ep1
+  Yosa Leostra:
+    voice: Puck
+    gender: male
+    description: Auto-detected male character
+    aliases: []
+    first_seen: ep1
+  Nina Leostra:
+    voice: Kore
+    gender: female
+    description: Auto-detected female character
+    aliases: []
+    first_seen: ep1
+  Ibu Yosa:
+    voice: Zephyr
+    gender: female
+    description: Auto-detected female character
+    aliases: []
+    first_seen: ep1
+  Yosa Kecil:
+    voice: Charon
+    gender: male
+    description: Auto-detected male character
+    aliases: []
+    first_seen: ep1
+  Pria berjas:
+    voice: Fenrir
+    gender: male
+    description: Auto-detected male character
+    aliases: []
+    first_seen: ep1
+  Silvia Leostra:
+    voice: Leda
+    gender: female
+    description: Auto-detected female character
+    aliases: []
+    first_seen: ep2
+  Yurike Leostra:
+    voice: Callirrhoe
+    gender: female
+    description: Auto-detected female character
+    aliases: []
+    first_seen: ep2
+  Yovan Leostra:
+    voice: Orus
+    gender: male
+    description: Auto-detected male character
+    aliases: []
+    first_seen: ep1
+episodes: {}

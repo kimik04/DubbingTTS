@@ -15,8 +15,8 @@ from .utils import (
 log = logging.getLogger(__name__)
 
 AVAILABLE_VOICES = {
-    "male": ["Puck", "Charon", "Fenrir", "Orus", "Leda"],
-    "female": ["Aoede", "Kore", "Zephyr", "Elara", "Vesta"],
+    "male": ["Puck", "Charon", "Fenrir", "Orus", "Enceladus", "Iapetus", "Algenib", "Rasalgethi"],
+    "female": ["Aoede", "Kore", "Zephyr", "Leda", "Callirrhoe", "Autonoe", "Despina", "Erinome"],
 }
 
 
@@ -70,7 +70,7 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
             file_uri, audio_mime, characters, scenes, source_lang, target_lang, api_key, model
         )
 
-    new_chars = _handle_new_characters(slug, identified, characters, char_genders)
+    new_chars = _handle_new_characters(slug, episode, identified, characters, char_genders)
     if new_chars:
         log.info(f"ep{episode}: added {len(new_chars)} new characters: {new_chars}")
 
@@ -144,8 +144,9 @@ Your task is to produce a transcription for voice dubbing. For each spoken line:
 - Translate into {target_name} naturally for dubbing. Keep translations concise — they should be speakable in roughly the same duration as the original speech.
 - Each spoken line = one segment. Do NOT merge lines. Do NOT skip any spoken line.
 
-KNOWN CHARACTERS:
+KNOWN CHARACTERS (YOU MUST REUSE THESE EXACT NAMES if the same character appears):
 {char_desc}
+IMPORTANT: If a speaker matches any known character above, you MUST use that exact name. Only create a new name if the voice is clearly a different person not listed above.
 
 SCENE CONTEXT:
 {scene_desc}
@@ -376,10 +377,15 @@ Provide a brief summary at the beginning."""
     return segments, char_genders
 
 
-def _handle_new_characters(slug: str, segments: list[Segment], characters: dict, char_genders: dict) -> list[str]:
+def _handle_new_characters(slug: str, episode: int, segments: list[Segment], characters: dict, char_genders: dict) -> list[str]:
     char_list = characters.get("characters", {})
     used_voices = {info.get("voice") for info in char_list.values()}
     new_chars = []
+
+    char_lines = {}
+    for seg in segments:
+        if seg.character:
+            char_lines.setdefault(seg.character, []).append(seg.text[:30])
 
     for seg in segments:
         if not seg.character or seg.character in char_list:
@@ -397,12 +403,14 @@ def _handle_new_characters(slug: str, segments: list[Segment], characters: dict,
 
         voice = pool[0]
         used_voices.add(voice)
+        lines = char_lines.get(seg.character, [])
+        desc = f"{gender.capitalize()} character, first lines: {'; '.join(lines[:3])}"
         char_list[seg.character] = {
             "voice": voice,
             "gender": gender,
-            "description": f"Auto-detected {gender} character",
+            "description": desc,
             "aliases": [],
-            "first_seen": "ep1",
+            "first_seen": f"ep{episode}",
         }
         new_chars.append(seg.character)
 

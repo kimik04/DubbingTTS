@@ -4,15 +4,52 @@ gemini_api_key: "your-gemini-api-key-here"
 # Models
 models:
   whisper: "mlx-community/whisper-small-mlx"
-  transcribe: "gemini-3.1-flash-lite-preview"
+  transcribe: "gemini-3-flash-preview"
   tts: "gemini-3.1-flash-live-preview"
 
 # Audio settings
 audio:
   sample_rate: 24000
-  max_speed: 1.25
+  max_speed: 1.5
   bg_volume: 1.0
   dub_volume: 0.7
+
+# Available voices for Live API TTS (use ONLY these names)
+voices:
+  male:
+    - Puck
+    - Charon
+    - Fenrir
+    - Orus
+    - Enceladus
+    - Iapetus
+    - Algenib
+    - Rasalgethi
+    - Alnilam
+    - Schedar
+    - Gacrux
+    - Achird
+    - Zubenelgenubi
+    - Sadaltager
+  female:
+    - Aoede
+    - Kore
+    - Zephyr
+    - Leda
+    - Callirrhoe
+    - Autonoe
+    - Despina
+    - Erinome
+    - Laomedeia
+    - Achernar
+    - Pulcherrima
+    - Vindemiatrix
+    - Sadachbia
+    - Sulafat
+
+# Transcription source: "video" or "audio"
+transcription:
+  source: "video"
 
 # Paths
 paths:
