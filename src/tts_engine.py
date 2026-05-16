@@ -5,7 +5,6 @@ import base64
 import json
 import logging
 import subprocess
-import time
 import wave
 from pathlib import Path
 
@@ -92,110 +91,83 @@ async def _generate_character_tts(
 
     log.info(f"  {character}: generating {len(pending)} segments")
 
-    ws = await _connect_ws(api_key, model)
-    try:
-        await _send_setup(ws, voice, target_name, model)
-
-        for seg, wav_path in pending:
-            slot_duration = seg.end_sec - seg.start_sec
-            for attempt in range(3):
-                try:
-                    pcm = await _generate_segment(ws, seg.translation)
-                    if not pcm:
-                        raise RuntimeError("Empty audio response")
-                    _pcm_to_wav(pcm, wav_path, sample_rate)
-                    _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
+    for seg, wav_path in pending:
+        slot_duration = seg.end_sec - seg.start_sec
+        for attempt in range(5):
+            try:
+                pcm = await _generate_single(api_key, model, voice, target_name, seg.translation)
+                if not pcm:
+                    raise RuntimeError("Empty audio response")
+                _pcm_to_wav(pcm, wav_path, sample_rate)
+                _adjust_tempo(wav_path, slot_duration, max_speed, sample_rate)
+                break
+            except Exception as e:
+                if attempt == 4:
+                    log.error(f"  {character} seg_{seg.index}: failed after 5 attempts ({e})")
                     break
-                except (websockets.exceptions.ConnectionClosed, RuntimeError, asyncio.TimeoutError) as e:
-                    if attempt == 2:
-                        log.error(f"  {character} seg_{seg.index}: failed after 3 attempts ({e})")
-                        break
-                    log.warning(f"  {character} seg_{seg.index}: failed ({e}), reconnecting...")
-                    await asyncio.sleep(2)
-                    try:
-                        await ws.close()
-                    except:
-                        pass
-                    ws = await _connect_ws(api_key, model)
-                    await _send_setup(ws, voice, target_name, model)
-    finally:
-        try:
-            await ws.close()
-        except:
-            pass
+                wait = 10 * (attempt + 1)
+                log.warning(f"  {character} seg_{seg.index}: attempt {attempt+1} failed ({e}), waiting {wait}s...")
+                await asyncio.sleep(wait)
+        await asyncio.sleep(0.5)
 
     return paths
 
 
-async def _connect_ws(api_key: str, model: str):
+async def _generate_single(api_key: str, model: str, voice: str, target_lang: str, text: str) -> bytes:
     url = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={api_key}"
-    ws = await websockets.connect(url, max_size=None, ping_interval=20, ping_timeout=10)
-    return ws
-
-
-async def _send_setup(ws, voice: str, target_lang: str, model: str):
-    setup_msg = {
-        "setup": {
-            "model": f"models/{model}",
-            "generationConfig": {
-                "responseModalities": ["AUDIO"],
-                "speechConfig": {
-                    "voiceConfig": {
-                        "prebuiltVoiceConfig": {"voiceName": voice}
+    ws = await websockets.connect(url, max_size=None)
+    try:
+        setup_msg = {
+            "setup": {
+                "model": f"models/{model}",
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {
+                        "voiceConfig": {
+                            "prebuiltVoiceConfig": {"voiceName": voice}
+                        }
                     }
+                },
+                "systemInstruction": {
+                    "parts": [{"text": f"RESPOND IN {target_lang.upper()}. YOU MUST RESPOND UNMISTAKABLY IN {target_lang.upper()}. You are a voice dubbing actor. Speak naturally and expressively."}]
                 }
-            },
-            "systemInstruction": {
-                "parts": [{"text": f"You are a professional voice dubbing actor. RESPOND IN {target_lang.upper()}. YOU MUST RESPOND UNMISTAKABLY IN {target_lang.upper()}. Speak naturally and expressively with appropriate emotion."}]
-            },
-            "contextWindowCompression": {
-                "slidingWindow": {}
-            },
-            "sessionResumption": {}
+            }
         }
-    }
-    await ws.send(json.dumps(setup_msg))
-
-    resp = await asyncio.wait_for(ws.recv(), timeout=15)
-    data = json.loads(resp)
-    if "setupComplete" not in data:
-        raise RuntimeError(f"Setup failed: {data}")
-
-
-async def _generate_segment(ws, text: str) -> bytes:
-    msg = {
-        "clientContent": {
-            "turns": [{"role": "user", "parts": [{"text": text}]}],
-            "turnComplete": True,
-        }
-    }
-    await ws.send(json.dumps(msg))
-
-    pcm_chunks = []
-    while True:
-        resp = await asyncio.wait_for(ws.recv(), timeout=30)
+        await ws.send(json.dumps(setup_msg))
+        resp = await asyncio.wait_for(ws.recv(), timeout=10)
         data = json.loads(resp)
+        if "setupComplete" not in data:
+            raise RuntimeError(f"Setup failed: {data}")
 
-        if "goAway" in data:
-            raise RuntimeError("Session GoAway received, need reconnect")
+        msg = {
+            "clientContent": {
+                "turns": [{"role": "user", "parts": [{"text": text}]}],
+                "turnComplete": True,
+            }
+        }
+        await ws.send(json.dumps(msg))
 
-        server_content = data.get("serverContent")
-        if not server_content:
-            continue
+        pcm_chunks = []
+        while True:
+            resp = await asyncio.wait_for(ws.recv(), timeout=30)
+            data = json.loads(resp)
 
-        if server_content.get("turnComplete"):
-            break
+            server_content = data.get("serverContent")
+            if not server_content:
+                continue
 
-        if server_content.get("interrupted"):
-            break
+            if server_content.get("turnComplete"):
+                break
 
-        parts = server_content.get("modelTurn", {}).get("parts", [])
-        for part in parts:
-            inline = part.get("inlineData")
-            if inline and inline.get("data"):
-                pcm_chunks.append(base64.b64decode(inline["data"]))
+            parts = server_content.get("modelTurn", {}).get("parts", [])
+            for part in parts:
+                inline = part.get("inlineData")
+                if inline and inline.get("data"):
+                    pcm_chunks.append(base64.b64decode(inline["data"]))
 
-    return b"".join(pcm_chunks)
+        return b"".join(pcm_chunks)
+    finally:
+        await ws.close()
 
 
 def _pcm_to_wav(pcm_data: bytes, output_path: Path, sample_rate: int):
