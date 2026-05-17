@@ -31,12 +31,7 @@ def main():
     p_dub.add_argument("--url")
     p_dub.add_argument("--force", action="store_true")
 
-    p_transcribe = subparsers.add_parser("transcribe", help="Transcribe audio")
-    p_transcribe.add_argument("--project", required=True)
-    p_transcribe.add_argument("--episode", type=int, required=True)
-    p_transcribe.add_argument("--force", action="store_true")
-
-    p_identify = subparsers.add_parser("identify", help="Identify characters")
+    p_identify = subparsers.add_parser("identify", help="Identify characters + translate")
     p_identify.add_argument("--project", required=True)
     p_identify.add_argument("--episode", type=int, required=True)
     p_identify.add_argument("--force", action="store_true")
@@ -58,7 +53,7 @@ def main():
     p_chars.add_argument("--voice")
     p_chars.add_argument("--gender")
 
-    p_preview = subparsers.add_parser("preview", help="Preview without TTS")
+    p_preview = subparsers.add_parser("preview", help="Preview (identify only, no TTS)")
     p_preview.add_argument("--project", required=True)
     p_preview.add_argument("--episode", type=int, required=True)
 
@@ -72,8 +67,6 @@ def main():
             cmd_projects(args)
         elif args.command == "dub":
             cmd_dub(args)
-        elif args.command == "transcribe":
-            cmd_transcribe(args)
         elif args.command == "identify":
             cmd_identify(args)
         elif args.command == "tts":
@@ -146,7 +139,7 @@ def cmd_projects(args):
 
 
 def cmd_dub(args):
-    from .downloader import download_episode, download_all, separate_audio
+    from .downloader import download_episode, separate_audio
     from .character_id import identify_episode
     from .tts_engine import generate_tts_episode_sync
     from .mixer import mix_episode
@@ -173,12 +166,6 @@ def cmd_dub(args):
         identify_episode(slug, ep_num, force=args.force)
         generate_tts_episode_sync(slug, ep_num, force=args.force)
         mix_episode(slug, ep_num, force=args.force)
-
-
-def cmd_transcribe(args):
-    from .transcriber import transcribe_episode
-    segments = transcribe_episode(args.project, args.episode, force=args.force)
-    print(f"Transcribed {len(segments)} segments")
 
 
 def cmd_identify(args):
@@ -226,8 +213,7 @@ def cmd_characters(args):
 
 
 def cmd_preview(args):
-    from .downloader import download_episode
-    from .transcriber import transcribe_episode
+    from .downloader import download_episode, separate_audio
     from .character_id import identify_episode
 
     slug = args.project
@@ -237,12 +223,12 @@ def cmd_preview(args):
         raise ValueError(f"Episode {args.episode} not found in links.txt")
 
     download_episode(slug, args.episode, match[1])
-    transcribe_episode(slug, args.episode)
+    separate_audio(slug, args.episode)
     segments = identify_episode(slug, args.episode)
 
     print(f"\n=== Preview: ep{args.episode} ({len(segments)} segments) ===\n")
     for s in segments:
-        print(f"[{s.start:.1f}-{s.end:.1f}] {s.character}: {s.translation}")
+        print(f"[{s.start}-{s.end}] {s.character}: {s.translation}")
 
 
 if __name__ == "__main__":

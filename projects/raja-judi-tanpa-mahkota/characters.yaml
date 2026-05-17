@@ -2,55 +2,56 @@ characters:
   Yuna Sanjaya:
     voice: Aoede
     gender: female
-    description: Auto-detected female character
+    description: 'Female character, first lines: 哎呀; 恐怕谁也想不到; 全球排名第一的赌神林夜'
     aliases: []
     first_seen: ep1
   Yosa Leostra:
     voice: Puck
     gender: male
-    description: Auto-detected male character
+    description: 'Male character, first lines: 宋月，你还真是阴魂不散; 不考虑; 也不考虑'
     aliases: []
     first_seen: ep1
   Nina Leostra:
     voice: Kore
     gender: female
-    description: Auto-detected female character
+    description: 'Female character, first lines: 小弟，就当姐求你; 跟我回家吧; 妈生前最大的愿望就是看到你回家'
     aliases: []
     first_seen: ep1
-  Ibu Yosa:
+  Mother:
     voice: Zephyr
     gender: female
-    description: Auto-detected female character
+    description: 'Female character, first lines: 小心！; 妈妈没事; 林夜别哭'
     aliases: []
     first_seen: ep1
-  Yosa Kecil:
+  Yosa Waktu Kecil:
     voice: Charon
     gender: male
-    description: Auto-detected male character
+    description: 'Male character, first lines: 妈妈不要死'
     aliases: []
     first_seen: ep1
-  Pria berjas:
+  Pelayan:
     voice: Fenrir
     gender: male
-    description: Auto-detected male character
+    description: 'Male character, first lines: 少爷，请跟我来'
     aliases: []
-    first_seen: ep1
+    first_seen: ep2
   Silvia Leostra:
     voice: Leda
     gender: female
-    description: Auto-detected female character
+    description: 'Female character, first lines: 哇，真是一条龙诶; 不错哦云龙; 你的赌术现在是越来越精湛了'
     aliases: []
     first_seen: ep2
   Yurike Leostra:
     voice: Callirrhoe
     gender: female
-    description: Auto-detected female character
+    description: 'Female character, first lines: 好好努力，以后咱们家，就靠你了; 这是我们那个装腔作势不肯回来的弟弟吧;
+      哎哟这身贫民窟的味儿真是熏得让人受不了'
     aliases: []
     first_seen: ep2
   Yovan Leostra:
     voice: Orus
     gender: male
-    description: Auto-detected male character
+    description: 'Male character, first lines: 你就是流落在外的林夜哥哥吗; 现在你回来了真好; 可别离我太近了'
     aliases: []
-    first_seen: ep1
+    first_seen: ep2
 episodes: {}
