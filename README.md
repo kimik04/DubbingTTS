@@ -12,43 +12,140 @@ Automated multi-language video dubbing bot. Converts video from any source langu
 - Duration-aware TTS — speech pace matches original dialogue timing
 - Character persistence across episodes with auto-detection
 - Full caching — resume from any step
-
-## Requirements
-
-- Python 3.9+
-- [ffmpeg](https://ffmpeg.org/download.html) in PATH
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) in PATH
-- [Gemini API key](https://aistudio.google.com/apikey)
+- Cross-platform — Windows, macOS, Linux
 
 ## Installation
+
+### Auto Setup (Recommended)
+
+The setup script auto-detects your OS and installs all dependencies:
+
+```bash
+git clone https://github.com/kimik04/DubbingTTS.git
+cd DubbingTTS
+python setup.py
+```
+
+This will install ffmpeg, yt-dlp, and Python dependencies automatically using your system's package manager (scoop/choco/winget on Windows, brew on macOS, apt/dnf/pacman on Linux).
+
+### Manual Setup
 
 ```bash
 git clone https://github.com/kimik04/DubbingTTS.git
 cd DubbingTTS
 pip install -r requirements.txt
 cp config.yaml.example config.yaml
-# Edit config.yaml — add your Gemini API key
 ```
+
+Install ffmpeg and yt-dlp manually:
+
+| OS | Command |
+|----|---------|
+| Windows | `scoop install ffmpeg yt-dlp` or `choco install ffmpeg yt-dlp` |
+| macOS | `brew install ffmpeg yt-dlp` |
+| Linux | `sudo apt install ffmpeg` + `pip install yt-dlp` |
+
+### Configuration
+
+Edit `config.yaml` and add your Gemini API key:
+
+```yaml
+gemini_api_key: "your-gemini-api-key-here"
+```
+
+Get a free API key at https://aistudio.google.com/apikey
 
 Or set via environment variable:
 
 ```bash
+# macOS/Linux
 export GEMINI_API_KEY="your-key-here"
+
+# Windows PowerShell
+$env:GEMINI_API_KEY="your-key-here"
 ```
 
-## Quick Start
+## Usage
+
+### 1. Create a Project
 
 ```bash
-# Create a new project
-python -m src.cli init "My Drama" --source zh --target id
+python -m src.cli init "Raja Judi Tanpa Mahkota" --source zh --target id
+```
 
-# Add video URLs to projects/my-drama/links.txt
+This creates a project folder at `projects/raja-judi-tanpa-mahkota/` with:
+- `project.yaml` — language settings
+- `characters.yaml` — character database (auto-populated)
+- `links.txt` — add your video URLs here
+
+### 2. Add Video URLs
+
+Edit `projects/your-project/links.txt`:
+
+```
+# One URL per line, order = episode number
+https://www.example.com/episode-1
+https://www.example.com/episode-2
+https://www.example.com/episode-3
+```
+
+Supports: YouTube, direct MP4 URLs, ReelShort, or local file paths.
+
+### 3. Run Dubbing
+
+```bash
+# Dub a single episode
+python -m src.cli dub --project raja-judi-tanpa-mahkota --episode 1
 
 # Dub all episodes
-python -m src.cli dub --project my-drama
+python -m src.cli dub --project raja-judi-tanpa-mahkota
 
-# Or dub a single episode
-python -m src.cli dub --project my-drama --episode 1
+# Dub from a specific URL (auto-assigns next episode number)
+python -m src.cli dub --project raja-judi-tanpa-mahkota --url "https://..."
+```
+
+Output video will be at `projects/your-project/output/ep1_dubbed.mp4`.
+
+### 4. Re-run or Fix Specific Steps
+
+If something goes wrong, you can re-run individual steps:
+
+```bash
+# Re-identify characters (re-upload video to Gemini)
+python -m src.cli identify --project slug --episode 1 --force
+
+# Re-generate TTS for all characters
+python -m src.cli tts --project slug --episode 1 --force
+
+# Re-generate TTS for one character only
+python -m src.cli tts --project slug --episode 1 --character "Yosa Leostra" --force
+
+# Re-mix audio (if you changed audio settings)
+python -m src.cli mix --project slug --episode 1 --force
+```
+
+### 5. Manage Characters
+
+```bash
+# List all characters in a project
+python -m src.cli characters --project slug
+
+# Manually add a character with specific voice
+python -m src.cli characters --project slug --add "Kakek" --voice Gacrux --gender male
+```
+
+### 6. Preview (No TTS)
+
+Preview runs identify only — useful to check if transcription and translation are correct before generating TTS:
+
+```bash
+python -m src.cli preview --project slug --episode 1
+```
+
+### 7. List Projects
+
+```bash
+python -m src.cli projects
 ```
 
 ## Pipeline
@@ -57,13 +154,13 @@ python -m src.cli dub --project my-drama --episode 1
 Video → Download → Demucs (separate vocals) → Gemini (identify + translate) → TTS → Mix → Dubbed Video
 ```
 
-| Step | Description | Tool |
-|------|-------------|------|
-| Download | Fetch video + extract audio | yt-dlp, ffmpeg |
-| Separate | Split vocals from background | Demucs |
-| Identify | Transcribe + speaker ID + translate + emotion | Gemini API |
-| TTS | Text-to-speech per character | Gemini Live WebSocket |
-| Mix | Place TTS at timestamps + mux with video | ffmpeg |
+| Step | What it does | Output |
+|------|-------------|--------|
+| Download | Fetch video via yt-dlp, extract audio | `cache/ep1/video.mp4`, `audio.mp3` |
+| Separate | Demucs splits vocals from background music | `cache/ep1/vocals.wav`, `no_vocals.wav` |
+| Identify | Gemini watches video, identifies speakers, translates | `cache/ep1/identified_segments.json` |
+| TTS | Gemini Live generates speech per character | `cache/ep1/tts/{Character}/seg_XXXX.wav` |
+| Mix | ffmpeg places TTS at timestamps, mixes with background | `output/ep1_dubbed.mp4` |
 
 ## Transcription Modes
 
@@ -71,56 +168,43 @@ Set in `config.yaml` under `transcription.source`:
 
 | Mode | Description | Best for |
 |------|-------------|----------|
-| `subtitle` | Read hardcoded subtitles from video frames | Videos with burned-in subtitles |
-| `video` | Transcribe from audio + visual cues | Videos without subtitles |
-| `audio` | Transcribe from voice only | Audio-only content |
+| `subtitle` | Read hardcoded subtitles from video frames, timestamp = subtitle appearance | Videos with burned-in subtitles (most accurate text) |
+| `video` | Transcribe from audio + visual cues, timestamp = when speech is heard | Videos without subtitles |
+| `audio` | Transcribe from voice only (no video upload needed) | Audio-only content or saving API quota |
 
-## CLI Commands
-
-```bash
-# Project management
-python -m src.cli init "Title" --source zh --target id
-python -m src.cli projects
-
-# Full pipeline
-python -m src.cli dub --project slug --episode 1
-python -m src.cli dub --project slug                    # all episodes
-
-# Individual steps
-python -m src.cli identify --project slug --episode 1
-python -m src.cli tts --project slug --episode 1
-python -m src.cli tts --project slug --episode 1 --character "Name"
-python -m src.cli mix --project slug --episode 1
-
-# Character management
-python -m src.cli characters --project slug
-python -m src.cli characters --project slug --add "Name" --voice Puck --gender male
-
-# Preview (identify only, no TTS)
-python -m src.cli preview --project slug --episode 1
-```
-
-## Configuration
+## Configuration Reference
 
 ```yaml
 # config.yaml
+
+# Gemini API key (or set GEMINI_API_KEY env var)
 gemini_api_key: "your-key"
 
+# Models
 models:
-  transcribe: "gemini-3-flash-preview"
-  tts: "gemini-3.1-flash-live-preview"
+  transcribe: "gemini-3-flash-preview"       # For video/audio analysis
+  tts: "gemini-3.1-flash-live-preview"       # For TTS via Live API
 
+# Audio settings
 audio:
-  sample_rate: 24000
-  max_speed: 1.5
-  bg_volume: 1.0
-  dub_volume: 0.7
+  sample_rate: 24000    # TTS output sample rate (Hz)
+  max_speed: 1.5        # Max atempo speedup for TTS that exceeds slot duration
+  bg_volume: 1.0        # Background music volume in final mix
+  dub_volume: 0.7       # Dubbed voice volume in final mix
 
+# Transcription mode
 transcription:
-  source: "subtitle"   # or "video" or "audio"
+  source: "subtitle"    # "subtitle", "video", or "audio"
+
+# Demucs settings
+demucs:
+  model: "htdemucs"     # Demucs model for vocal separation
+  two_stems: true       # Separate into vocals + no_vocals only
 ```
 
 ## Available TTS Voices
+
+All voices are from Gemini Live API. Use these exact names in `characters.yaml`:
 
 | Male | Female |
 |------|--------|
@@ -132,29 +216,63 @@ transcription:
 | Iapetus | Autonoe |
 | Algenib | Despina |
 | Rasalgethi | Erinome |
-
-See `config.yaml.example` for the full list of 28 voices.
+| Alnilam | Laomedeia |
+| Schedar | Achernar |
+| Gacrux | Pulcherrima |
+| Achird | Vindemiatrix |
+| Zubenelgenubi | Sadachbia |
+| Sadaltager | Sulafat |
 
 ## Project Structure
 
 ```
 DubbingTTS/
-├── config.yaml              # Global config
+├── setup.py                 # Auto-setup script (detect OS, install deps)
+├── config.yaml              # Global config (API key, models, audio settings)
+├── config.yaml.example      # Template config
+├── requirements.txt         # Python dependencies
 ├── projects/
 │   └── {slug}/
-│       ├── project.yaml     # Language settings
-│       ├── characters.yaml  # Character database (persistent)
-│       ├── links.txt        # Episode URLs
-│       ├── cache/ep{N}/     # Intermediate files
-│       └── output/          # Final dubbed videos
+│       ├── project.yaml     # Language settings (source/target)
+│       ├── characters.yaml  # Character database (voice, gender, persistent)
+│       ├── links.txt        # Episode video URLs (one per line)
+│       ├── cache/
+│       │   └── ep{N}/
+│       │       ├── video.mp4
+│       │       ├── audio.mp3
+│       │       ├── vocals.wav
+│       │       ├── no_vocals.wav
+│       │       ├── identified_segments.json
+│       │       └── tts/{Character}/seg_XXXX.wav
+│       └── output/
+│           └── ep{N}_dubbed.mp4
 └── src/
     ├── cli.py               # CLI entry point
-    ├── downloader.py        # Download + demucs separation
-    ├── character_id.py      # Gemini transcription + identification
-    ├── tts_engine.py        # Gemini Live TTS
-    ├── mixer.py             # Audio mixing + video muxing
-    └── utils.py             # Shared helpers
+    ├── downloader.py        # Download video + demucs separation
+    ├── character_id.py      # Gemini: transcribe + identify + translate
+    ├── tts_engine.py        # Gemini Live API: text-to-speech
+    ├── mixer.py             # ffmpeg: mix TTS + background + video
+    └── utils.py             # Shared helpers (config, segments, retry)
 ```
+
+## Supported Languages
+
+**Source** (what language the video is in):
+zh, en, ko, ja, th, es, fr, de, ru, ar, and any language Gemini can understand
+
+**Target** (what language to dub into):
+id, en, zh, ms, th, and any language Gemini TTS can speak
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| 429 Too Many Requests | Wait 1-2 minutes, retry. Free tier = 5 RPM |
+| 1011 Internal Error on TTS | Voice name invalid or server overloaded. Check voice list above |
+| TTS too fast/slow | Adjust `audio.max_speed` in config (1.0-2.0) |
+| Dubbing not synced | Try `transcription.source: "subtitle"` for videos with hardcoded subs |
+| Characters not consistent across episodes | Check `characters.yaml` — names must match exactly |
+| Demucs fails | Install `soundfile`: `pip install soundfile` |
 
 ## License
 
