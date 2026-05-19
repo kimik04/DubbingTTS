@@ -101,13 +101,13 @@ def cmd_init(args):
             "language": {"source": args.source, "target": args.target},
             "episodes": {},
         }
-        with open(project_yaml, "w") as f:
+        with open(project_yaml, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
 
     chars_yaml = project_dir / "characters.yaml"
     if not chars_yaml.exists():
         import yaml
-        with open(chars_yaml, "w") as f:
+        with open(chars_yaml, "w", encoding="utf-8") as f:
             yaml.dump({"characters": {}, "episodes": {}}, f)
 
     links_txt = project_dir / "links.txt"
@@ -131,7 +131,7 @@ def cmd_projects(args):
         yaml_path = d / "project.yaml"
         if yaml_path.exists():
             import yaml
-            with open(yaml_path) as f:
+            with open(yaml_path, encoding="utf-8") as f:
                 p = yaml.safe_load(f)
             lang = p.get("language", {})
             links = parse_links(d.name)

@@ -1,9 +1,8 @@
 # Config with API keys
 config.yaml
 
-# Cache and output
-projects/*/cache/
-projects/*/output/
+# All project data (cache, output, config, characters, links)
+projects/
 
 # Python
 __pycache__/

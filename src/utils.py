@@ -42,7 +42,7 @@ class Segment:
 
 def load_global_config() -> dict:
     path = PROJECT_ROOT / "config.yaml"
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
     env_key = os.environ.get("GEMINI_API_KEY")
     if env_key:
@@ -52,7 +52,7 @@ def load_global_config() -> dict:
 
 def load_project_config(slug: str) -> dict:
     path = PROJECT_ROOT / "projects" / slug / "project.yaml"
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         project = yaml.safe_load(f)
     global_config = load_global_config()
     audio = {**global_config.get("audio", {}), **project.get("audio", {})}
@@ -65,13 +65,13 @@ def load_characters(slug: str) -> dict:
     path = PROJECT_ROOT / "projects" / slug / "characters.yaml"
     if not path.exists():
         return {"characters": {}, "episodes": {}}
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {"characters": {}, "episodes": {}}
 
 
 def save_characters(slug: str, data: dict):
     path = PROJECT_ROOT / "projects" / slug / "characters.yaml"
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
@@ -79,7 +79,7 @@ def parse_links(slug: str) -> List[Tuple[int, str]]:
     path = PROJECT_ROOT / "projects" / slug / "links.txt"
     results = []
     ep_num = 0
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -159,11 +159,11 @@ def retry_async(max_retries=3, backoff_base=2.0, retryable_exceptions=(Exception
 
 
 def save_segments(segments: list[Segment], path: Path):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump([s.to_dict() for s in segments], f, ensure_ascii=False, indent=2)
 
 
 def load_segments(path: Path) -> list[Segment]:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return [Segment.from_dict(d) for d in data]
