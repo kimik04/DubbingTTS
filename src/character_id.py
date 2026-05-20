@@ -176,12 +176,9 @@ Provide a brief summary at the beginning."""
                         "translation": {"type": "string"},
                         "language": {"type": "string"},
                         "gender": {"type": "string"},
-                        "emotion": {
-                            "type": "string",
-                            "enum": ["happy", "sad", "angry", "neutral"]
-                        }
+                        "intonation": {"type": "string"}
                     },
-                    "required": ["speaker", "timestamp", "content", "translation", "gender", "emotion"]
+                    "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
                 }
             }
         },
@@ -233,7 +230,7 @@ Your task:
 - Read EVERY subtitle that appears on screen. The subtitle text is the ground truth.
 - For each subtitle, record the TIMESTAMP (MM:SS) of when it APPEARS on screen.
 - Identify the speaker by voice and visual appearance.
-- Detect the emotion from the tone of voice.
+- For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Examples: "nervous, trembling, slow", "sarcastic, cutting, fast", "whispering, intimate, breathy", "shouting angrily, aggressive". Keep it under 10 words. This helps the TTS engine replicate the original performance.
 - If the subtitle is already in {target_name}, use it directly as the translation. Do NOT re-translate it.
 - If the subtitle is in another language, translate it into {target_name} naturally for dubbing. Keep translations concise.
 - Each subtitle appearance = one segment. Do NOT merge. Do NOT skip any subtitle.
@@ -265,12 +262,9 @@ Provide a brief summary at the beginning."""
                         "translation": {"type": "string"},
                         "language": {"type": "string"},
                         "gender": {"type": "string"},
-                        "emotion": {
-                            "type": "string",
-                            "enum": ["happy", "sad", "angry", "neutral"]
-                        }
+                        "intonation": {"type": "string"}
                     },
-                    "required": ["speaker", "timestamp", "content", "translation", "gender", "emotion"]
+                    "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
                 }
             }
         },
@@ -314,15 +308,15 @@ def _parse_segments(result: dict) -> tuple[list[Segment], dict]:
         else:
             end_ts = start_ts
 
-        emotion = seg.get("emotion", "neutral")
+        intonation = seg.get("intonation", "")
         translation = seg.get("translation", seg.get("content", ""))
 
         if translation == prev_translation and translation:
             continue
         prev_translation = translation
 
-        if emotion != "neutral":
-            translation = f"[{emotion}] {translation}"
+        if intonation:
+            translation = f"[{intonation}] {translation}"
 
         start_sec = parse_timestamp(start_ts)
         end_sec = parse_timestamp(end_ts)
@@ -407,12 +401,9 @@ Provide a brief summary at the beginning."""
                         "translation": {"type": "string"},
                         "language": {"type": "string"},
                         "gender": {"type": "string"},
-                        "emotion": {
-                            "type": "string",
-                            "enum": ["happy", "sad", "angry", "neutral"]
-                        }
+                        "intonation": {"type": "string"}
                     },
-                    "required": ["speaker", "timestamp", "content", "translation", "gender", "emotion"]
+                    "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
                 }
             }
         },

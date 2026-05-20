@@ -5,6 +5,10 @@ import logging
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 from .utils import (
     PROJECT_ROOT, setup_logging, load_project_config, load_global_config,
     load_characters, save_characters, parse_links, get_cache_dir, load_segments,
