@@ -67,35 +67,47 @@ $env:GEMINI_API_KEY="your-key-here"
 
 ## Usage
 
-### 1. Create a Project
+### 1. Create a Project (Auto)
+
+Just paste an episode 1 URL — the bot auto-detects the title and scrapes all episode links:
+
+```bash
+python -m src.cli auto "https://www.reelshort.com/id/episodes/episode-1-senyum-manis-di-bibirnya-695f4e3f97c459a97700cc5f-f2vwi23a98" --source zh --target id
+```
+
+Output:
+```
+Title: Senyum Manis di Bibirnya
+Project: senyum-manis-di-bibirnya
+Episodes: 62
+
+Run: python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1
+```
+
+Currently supports auto-scraping for ReelShort. For other platforms, use manual setup.
+
+### 1b. Create a Project (Manual)
 
 ```bash
 python -m src.cli init "Raja Judi Tanpa Mahkota" --source zh --target id
 ```
 
-This creates a project folder at `projects/raja-judi-tanpa-mahkota/` with:
-- `project.yaml` — language settings
-- `characters.yaml` — character database (auto-populated)
-- `links.txt` — add your video URLs here
-
-### 2. Add Video URLs
-
-Edit `projects/your-project/links.txt`:
+Then edit `projects/your-project/links.txt`:
 
 ```
 # One URL per line, order = episode number
-https://www.example.com/episode-1
-https://www.example.com/episode-2
-https://www.example.com/episode-3
+https://www.reelshort.com/id/episodes/episode-1-...
+https://www.reelshort.com/id/episodes/episode-2-...
+https://www.reelshort.com/id/episodes/episode-3-...
 ```
 
-Supports: YouTube, direct MP4 URLs, ReelShort, or local file paths.
+Supports: ReelShort, YouTube, direct MP4 URLs, or local file paths.
 
-### 3. Run Dubbing
+### 2. Run Dubbing
 
 ```bash
 # Dub a single episode
-python -m src.cli dub --project raja-judi-tanpa-mahkota --episode 1
+python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1
 
 # Dub all episodes
 python -m src.cli dub --project raja-judi-tanpa-mahkota
