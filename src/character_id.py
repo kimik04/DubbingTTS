@@ -227,16 +227,17 @@ def _single_pass_subtitle(file_uri, characters, scenes, source_lang, target_lang
     for s in scenes:
         scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
 
-    prompt = f"""Watch this video carefully. It has hardcoded subtitles in {source_name}.
+    prompt = f"""Watch this video carefully. It has hardcoded subtitles.
 
 Your task:
 - Read EVERY subtitle that appears on screen. The subtitle text is the ground truth.
 - For each subtitle, record the TIMESTAMP (MM:SS) of when it APPEARS on screen.
 - Identify the speaker by voice and visual appearance.
 - Detect the emotion from the tone of voice.
-- Translate into {target_name} naturally for dubbing. Keep translations concise.
+- If the subtitle is already in {target_name}, use it directly as the translation. Do NOT re-translate it.
+- If the subtitle is in another language, translate it into {target_name} naturally for dubbing. Keep translations concise.
 - Each subtitle appearance = one segment. Do NOT merge. Do NOT skip any subtitle.
-- IGNORE any existing translated subtitle track — only read the {source_name} subtitle.
+- If there are multiple subtitle tracks on screen, prefer the {target_name} one. If none is in {target_name}, use the {source_name} one and translate it.
 
 KNOWN CHARACTERS (YOU MUST REUSE THESE EXACT NAMES if the same character appears):
 {char_desc}
