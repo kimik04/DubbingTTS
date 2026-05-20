@@ -18,6 +18,11 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    p_auto = subparsers.add_parser("auto", help="Auto-create project from episode 1 URL")
+    p_auto.add_argument("url", help="Episode 1 URL (ReelShort, GoodShort, etc.)")
+    p_auto.add_argument("--source", default="zh", help="Source language (default: zh)")
+    p_auto.add_argument("--target", default="id", help="Target language (default: id)")
+
     p_init = subparsers.add_parser("init", help="Create new project")
     p_init.add_argument("title")
     p_init.add_argument("--source", required=True)
@@ -61,7 +66,9 @@ def main():
     setup_logging(args.verbose)
 
     try:
-        if args.command == "init":
+        if args.command == "auto":
+            cmd_auto(args)
+        elif args.command == "init":
             cmd_init(args)
         elif args.command == "projects":
             cmd_projects(args)
@@ -82,6 +89,104 @@ def main():
         if args.verbose:
             raise
         sys.exit(1)
+
+
+def cmd_auto(args):
+    import re
+    import subprocess
+    from urllib.request import urlopen
+
+    url = args.url
+    log.info(f"Detecting title from URL...")
+
+    result = subprocess.run(
+        ["yt-dlp", "--print", "title", "--no-download", url],
+        capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Cannot detect title from URL. yt-dlp error: {result.stderr.strip()}")
+
+    raw_title = result.stdout.strip()
+    title = re.sub(r"^\s*Episode\s*\d+\s*[-–—]\s*", "", raw_title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*[-–—]\s*EP\.?\s*\d+.*$", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*[-–—]\s*Episode\s*\d+.*$", "", title, flags=re.IGNORECASE)
+    title = title.strip(" -–—")
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+
+    log.info(f"Title: {title}")
+    log.info(f"Project: {slug}")
+
+    episodes = [url]
+
+    if "reelshort.com" in url:
+        log.info("Detected ReelShort — scraping all episodes...")
+        series_match = re.search(r"reelshort\.com/\w+/episodes/episode-\d+-(.+?)-([a-f0-9]{24})", url)
+        if series_match:
+            series_slug = series_match.group(1)
+            series_id = series_match.group(2)
+            lang_prefix = re.search(r"reelshort\.com/(\w+)/episodes", url)
+            lang = lang_prefix.group(1) if lang_prefix else "id"
+
+            all_eps = set()
+            all_eps.add(url.split("?")[0])
+
+            for page in range(1, 20):
+                page_url = f"https://www.reelshort.com/{lang}/full-episodes/{series_slug}-{series_id}" + (f"/{page}" if page > 1 else "")
+                try:
+                    resp = urlopen(page_url, timeout=10)
+                    if resp.status != 200:
+                        break
+                    html = resp.read().decode("utf-8")
+                    found = re.findall(rf'href="(/{lang}/episodes/episode-\d+-{re.escape(series_slug)}-{series_id}-[^"]+)"', html)
+                    if not found:
+                        break
+                    for f in found:
+                        all_eps.add(f"https://www.reelshort.com{f}")
+                except Exception:
+                    break
+
+            def ep_num(u):
+                m = re.search(r"episode-(\d+)-", u)
+                return int(m.group(1)) if m else 0
+
+            episodes = sorted(all_eps, key=ep_num)
+
+    log.info(f"Found {len(episodes)} episodes")
+
+    project_dir = PROJECT_ROOT / "projects" / slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "cache").mkdir(exist_ok=True)
+    (project_dir / "output").mkdir(exist_ok=True)
+
+    import yaml
+    project_yaml = project_dir / "project.yaml"
+    if not project_yaml.exists():
+        data = {
+            "title": title,
+            "slug": slug,
+            "language": {"source": args.source, "target": args.target},
+            "episodes": {},
+        }
+        with open(project_yaml, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+    chars_yaml = project_dir / "characters.yaml"
+    if not chars_yaml.exists():
+        with open(chars_yaml, "w", encoding="utf-8") as f:
+            yaml.dump({"characters": {}, "episodes": {}}, f)
+
+    links_txt = project_dir / "links.txt"
+    with open(links_txt, "w", encoding="utf-8") as f:
+        f.write(f"# {title}\n")
+        for ep_url in episodes:
+            f.write(f"{ep_url}\n")
+
+    print(f"Project created: {slug}")
+    print(f"  Title: {title}")
+    print(f"  Path: {project_dir}")
+    print(f"  Language: {args.source} -> {args.target}")
+    print(f"  Episodes: {len(episodes)}")
+    print(f"\nRun: python -m src.cli dub --project {slug} --episode 1")
 
 
 def cmd_init(args):
