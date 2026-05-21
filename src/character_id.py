@@ -146,7 +146,7 @@ Your task is to produce a transcription for voice dubbing. For each spoken line:
 - Determine the TIMESTAMP (MM:SS) from when you HEAR the person speaking in the audio. Mark the moment speech begins.
 - Transcribe what is said by listening to the audio.
 - Identify the speaker by their voice characteristics and visual appearance (who is on screen, lip movement).
-- Detect the emotion from the tone of voice.
+- For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Examples: "nervous, trembling, slow", "sarcastic, cutting, fast", "whispering, intimate, breathy", "shouting angrily, aggressive". Keep it under 10 words. This helps the TTS engine replicate the original performance.
 - Translate into {target_name} naturally for dubbing. Keep translations concise — they should be speakable in roughly the same duration as the original speech.
 - Each spoken line = one segment. Do NOT merge lines. Do NOT skip any spoken line.
 
@@ -373,7 +373,7 @@ Requirements:
 1. Identify distinct speakers by voice characteristics.
 2. Provide accurate timestamps for each segment (Format: MM:SS).
 3. Detect the primary language of each segment.
-4. Identify the primary emotion: happy, sad, angry, or neutral.
+4. For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Keep it under 10 words.
 5. For each segment, also provide a translation into {target_name} that sounds natural for voice dubbing. Keep translations concise.
 
 KNOWN CHARACTERS:
@@ -439,10 +439,10 @@ Provide a brief summary at the beginning."""
         else:
             end_ts = start_ts
 
-        emotion = seg.get("emotion", "neutral")
+        intonation = seg.get("intonation", "")
         translation = seg.get("translation", seg.get("content", ""))
-        if emotion != "neutral":
-            translation = f"[{emotion}] {translation}"
+        if intonation:
+            translation = f"[{intonation}] {translation}"
 
         character = seg.get("speaker", "Unknown")
         gender = _normalize_gender(seg.get("gender", "male"))
