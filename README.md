@@ -109,14 +109,34 @@ Supports: ReelShort, YouTube, direct MP4 URLs, or local file paths.
 # Dub a single episode
 python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1
 
+# Dub a range of episodes
+python -m src.cli dub --project senyum-manis-di-bibirnya --episode 3-10
+
 # Dub all episodes
-python -m src.cli dub --project raja-judi-tanpa-mahkota
+python -m src.cli dub --project senyum-manis-di-bibirnya
 
 # Dub from a specific URL (auto-assigns next episode number)
-python -m src.cli dub --project raja-judi-tanpa-mahkota --url "https://..."
+python -m src.cli dub --project senyum-manis-di-bibirnya --url "https://..."
 ```
 
 Output video will be at `projects/your-project/output/ep1_dubbed.mp4`.
+
+### 3. Merge Episodes
+
+Combine multiple dubbed episodes into one video:
+
+```bash
+# Merge specific range
+python -m src.cli merge --project senyum-manis-di-bibirnya --episode 1-10
+
+# Merge all dubbed episodes
+python -m src.cli merge --project senyum-manis-di-bibirnya
+
+# Custom output filename
+python -m src.cli merge --project senyum-manis-di-bibirnya --episode 1-5 --output "part1.mp4"
+```
+
+Output: `projects/your-project/output/ep1-10_dubbed.mp4` (or `full_dubbed.mp4` for all).
 
 ### 4. Re-run or Fix Specific Steps
 

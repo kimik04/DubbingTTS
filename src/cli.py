@@ -36,25 +36,30 @@ def main():
 
     p_dub = subparsers.add_parser("dub", help="Full dubbing pipeline")
     p_dub.add_argument("--project", required=True)
-    p_dub.add_argument("--episode", type=int)
+    p_dub.add_argument("--episode", help="Episode number or range (e.g., 1, 3-10)")
     p_dub.add_argument("--url")
     p_dub.add_argument("--force", action="store_true")
 
     p_identify = subparsers.add_parser("identify", help="Identify characters + translate")
     p_identify.add_argument("--project", required=True)
-    p_identify.add_argument("--episode", type=int, required=True)
+    p_identify.add_argument("--episode", required=True, help="Episode number or range")
     p_identify.add_argument("--force", action="store_true")
 
     p_tts = subparsers.add_parser("tts", help="Generate TTS")
     p_tts.add_argument("--project", required=True)
-    p_tts.add_argument("--episode", type=int, required=True)
+    p_tts.add_argument("--episode", required=True, help="Episode number or range")
     p_tts.add_argument("--character")
     p_tts.add_argument("--force", action="store_true")
 
     p_mix = subparsers.add_parser("mix", help="Mix audio and mux video")
     p_mix.add_argument("--project", required=True)
-    p_mix.add_argument("--episode", type=int, required=True)
+    p_mix.add_argument("--episode", required=True, help="Episode number or range")
     p_mix.add_argument("--force", action="store_true")
+
+    p_merge = subparsers.add_parser("merge", help="Merge dubbed episodes into one video")
+    p_merge.add_argument("--project", required=True)
+    p_merge.add_argument("--episode", help="Episode range (e.g., 1-10, all)")
+    p_merge.add_argument("--output", help="Output filename")
 
     p_chars = subparsers.add_parser("characters", help="Manage characters")
     p_chars.add_argument("--project", required=True)
@@ -64,7 +69,7 @@ def main():
 
     p_preview = subparsers.add_parser("preview", help="Preview (identify only, no TTS)")
     p_preview.add_argument("--project", required=True)
-    p_preview.add_argument("--episode", type=int, required=True)
+    p_preview.add_argument("--episode", required=True, help="Episode number")
 
     args = parser.parse_args()
     setup_logging(args.verbose)
@@ -84,6 +89,8 @@ def main():
             cmd_tts(args)
         elif args.command == "mix":
             cmd_mix(args)
+        elif args.command == "merge":
+            cmd_merge(args)
         elif args.command == "characters":
             cmd_characters(args)
         elif args.command == "preview":
@@ -247,6 +254,18 @@ def cmd_projects(args):
             print(f"  {d.name}: {p.get('title', '?')} ({lang.get('source', '?')} -> {lang.get('target', '?')}, {len(links)} eps)")
 
 
+def _parse_episode_range(ep_arg, links):
+    if not ep_arg:
+        return links
+    if "-" in ep_arg:
+        start, end = ep_arg.split("-", 1)
+        start, end = int(start), int(end)
+        return [(n, u) for n, u in links if start <= n <= end]
+    else:
+        num = int(ep_arg)
+        return [(n, u) for n, u in links if n == num]
+
+
 def cmd_dub(args):
     from .downloader import download_episode, separate_audio
     from .character_id import identify_episode
@@ -259,14 +278,11 @@ def cmd_dub(args):
         links = parse_links(slug)
         ep_num = len(links) + 1
         episodes = [(ep_num, args.url)]
-    elif args.episode:
-        links = parse_links(slug)
-        match = next((l for l in links if l[0] == args.episode), None)
-        if not match:
-            raise ValueError(f"Episode {args.episode} not found in links.txt")
-        episodes = [match]
     else:
-        episodes = parse_links(slug)
+        links = parse_links(slug)
+        episodes = _parse_episode_range(args.episode, links)
+        if not episodes:
+            raise ValueError(f"No episodes found for '{args.episode}' in links.txt")
 
     for ep_num, url in episodes:
         log.info(f"=== Episode {ep_num} ===")
@@ -279,23 +295,80 @@ def cmd_dub(args):
 
 def cmd_identify(args):
     from .character_id import identify_episode
-    segments = identify_episode(args.project, args.episode, force=args.force)
-    print(f"Identified {len(segments)} segments")
-    for s in segments:
-        print(f"  [{s.start}-{s.end}] {s.character}: {s.translation}")
+    links = parse_links(args.project)
+    episodes = _parse_episode_range(args.episode, links)
+    for ep_num, _ in episodes:
+        segments = identify_episode(args.project, ep_num, force=args.force)
+        print(f"ep{ep_num}: {len(segments)} segments")
+        for s in segments:
+            print(f"  [{s.start}-{s.end}] {s.character}: {s.translation}")
 
 
 def cmd_tts(args):
     from .tts_engine import generate_tts_episode_sync
-    results = generate_tts_episode_sync(args.project, args.episode, character_filter=args.character, force=args.force)
-    for char, paths in results.items():
-        print(f"  {char}: {len(paths)} segments")
+    links = parse_links(args.project)
+    episodes = _parse_episode_range(args.episode, links)
+    for ep_num, _ in episodes:
+        results = generate_tts_episode_sync(args.project, ep_num, character_filter=args.character, force=args.force)
+        for char, paths in results.items():
+            print(f"  {char}: {len(paths)} segments")
 
 
 def cmd_mix(args):
     from .mixer import mix_episode
-    output = mix_episode(args.project, args.episode, force=args.force)
-    print(f"Output: {output}")
+    links = parse_links(args.project)
+    episodes = _parse_episode_range(args.episode, links)
+    for ep_num, _ in episodes:
+        output = mix_episode(args.project, ep_num, force=args.force)
+        print(f"Output: {output}")
+
+
+def cmd_merge(args):
+    import subprocess
+    output_dir = get_output_dir(args.project)
+    links = parse_links(args.project)
+
+    ep_arg = args.episode or "all"
+    if ep_arg == "all":
+        episodes = links
+    else:
+        episodes = _parse_episode_range(ep_arg, links)
+
+    files = []
+    for ep_num, _ in episodes:
+        f = output_dir / f"ep{ep_num}_dubbed.mp4"
+        if f.exists():
+            files.append(f)
+
+    if not files:
+        print("No dubbed episodes found to merge.")
+        return
+
+    if args.output:
+        out_name = args.output
+    else:
+        if len(episodes) == len(links):
+            out_name = "full_dubbed.mp4"
+        else:
+            start = episodes[0][0]
+            end = episodes[-1][0]
+            out_name = f"ep{start}-{end}_dubbed.mp4"
+
+    out_path = output_dir / out_name
+    concat_file = output_dir / "concat_list.txt"
+
+    with open(concat_file, "w", encoding="utf-8") as f:
+        for fp in files:
+            f.write(f"file '{fp.name}'\n")
+
+    cmd = [
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", str(concat_file), "-c", "copy", str(out_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    concat_file.unlink()
+
+    print(f"Merged {len(files)} episodes -> {out_path}")
 
 
 def cmd_characters(args):
