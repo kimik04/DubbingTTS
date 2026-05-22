@@ -131,24 +131,24 @@ def cmd_auto(args):
 
     if "reelshort.com" in url:
         log.info("Detected ReelShort — scraping all episodes...")
-        series_match = re.search(r"reelshort\.com/\w+/episodes/episode-\d+-(.+?)-([a-f0-9]{24})", url)
+        series_match = re.search(r"reelshort\.com/(?:(\w+)/)?episodes/episode-\d+-(.+?)-([a-f0-9]{24})", url)
         if series_match:
-            series_slug = series_match.group(1)
-            series_id = series_match.group(2)
-            lang_prefix = re.search(r"reelshort\.com/(\w+)/episodes", url)
-            lang = lang_prefix.group(1) if lang_prefix else "id"
+            lang = series_match.group(1) or ""
+            series_slug = series_match.group(2)
+            series_id = series_match.group(3)
+            lang_path = f"{lang}/" if lang else ""
 
             all_eps = set()
             all_eps.add(url.split("?")[0])
 
             for page in range(1, 20):
-                page_url = f"https://www.reelshort.com/{lang}/full-episodes/{series_slug}-{series_id}" + (f"/{page}" if page > 1 else "")
+                page_url = f"https://www.reelshort.com/{lang_path}full-episodes/{series_slug}-{series_id}" + (f"/{page}" if page > 1 else "")
                 try:
                     resp = urlopen(page_url, timeout=10)
                     if resp.status != 200:
                         break
                     html = resp.read().decode("utf-8")
-                    found = re.findall(rf'href="(/{lang}/episodes/episode-\d+-{re.escape(series_slug)}-{series_id}-[^"]+)"', html)
+                    found = re.findall(rf'href="(/{re.escape(lang_path)}episodes/episode-\d+-{re.escape(series_slug)}-{series_id}-[^"]+)"', html)
                     if not found:
                         break
                     for f in found:
