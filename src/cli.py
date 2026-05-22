@@ -11,7 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from .utils import (
     PROJECT_ROOT, setup_logging, load_project_config, load_global_config,
-    load_characters, save_characters, parse_links, get_cache_dir, load_segments,
+    load_characters, save_characters, parse_links, get_cache_dir, get_output_dir, load_segments,
 )
 
 log = logging.getLogger(__name__)
