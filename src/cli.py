@@ -39,6 +39,7 @@ def main():
     p_dub.add_argument("--episode", help="Episode number or range (e.g., 1, 3-10)")
     p_dub.add_argument("--url")
     p_dub.add_argument("--force", action="store_true")
+    p_dub.add_argument("--subtitle", action="store_true", help="Burn translated subtitle with dynamic blur after mixing")
 
     p_identify = subparsers.add_parser("identify", help="Identify characters + translate")
     p_identify.add_argument("--project", required=True)
@@ -55,6 +56,11 @@ def main():
     p_mix.add_argument("--project", required=True)
     p_mix.add_argument("--episode", required=True, help="Episode number or range")
     p_mix.add_argument("--force", action="store_true")
+
+    p_subtitle = subparsers.add_parser("subtitle", help="Burn translated subtitle with dynamic blur on dubbed video")
+    p_subtitle.add_argument("--project", required=True)
+    p_subtitle.add_argument("--episode", required=True, help="Episode number or range")
+    p_subtitle.add_argument("--force", action="store_true")
 
     p_merge = subparsers.add_parser("merge", help="Merge dubbed episodes into one video")
     p_merge.add_argument("--project", required=True)
@@ -89,6 +95,8 @@ def main():
             cmd_tts(args)
         elif args.command == "mix":
             cmd_mix(args)
+        elif args.command == "subtitle":
+            cmd_subtitle(args)
         elif args.command == "merge":
             cmd_merge(args)
         elif args.command == "characters":
@@ -271,6 +279,7 @@ def cmd_dub(args):
     from .character_id import identify_episode
     from .tts_engine import generate_tts_episode_sync
     from .mixer import mix_episode
+    from .subtitler import subtitle_episode
 
     slug = args.project
 
@@ -291,6 +300,8 @@ def cmd_dub(args):
         identify_episode(slug, ep_num, force=args.force)
         generate_tts_episode_sync(slug, ep_num, force=args.force)
         mix_episode(slug, ep_num, force=args.force)
+        if args.subtitle:
+            subtitle_episode(slug, ep_num, force=args.force)
 
 
 def cmd_identify(args):
@@ -320,6 +331,15 @@ def cmd_mix(args):
     episodes = _parse_episode_range(args.episode, links)
     for ep_num, _ in episodes:
         output = mix_episode(args.project, ep_num, force=args.force)
+        print(f"Output: {output}")
+
+
+def cmd_subtitle(args):
+    from .subtitler import subtitle_episode
+    links = parse_links(args.project)
+    episodes = _parse_episode_range(args.episode, links)
+    for ep_num, _ in episodes:
+        output = subtitle_episode(args.project, ep_num, force=args.force)
         print(f"Output: {output}")
 
 

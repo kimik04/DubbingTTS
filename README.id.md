@@ -117,6 +117,9 @@ python -m src.cli dub --project senyum-manis-di-bibirnya
 
 # Dub dari URL spesifik
 python -m src.cli dub --project senyum-manis-di-bibirnya --url "https://..."
+
+# Dub + burn subtitle Indonesia (blur subtitle asli + tempel subtitle baru)
+python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1 --subtitle
 ```
 
 Output video ada di `projects/nama-project/output/ep1_dubbed.mp4`.
@@ -154,7 +157,19 @@ python -m src.cli tts --project slug --episode 1 --character "Yosa Leostra" --fo
 
 # Re-mix audio (kalau ubah audio settings)
 python -m src.cli mix --project slug --episode 1 --force
+
+# Burn subtitle Indonesia ke video yang sudah dub-ed
+python -m src.cli subtitle --project slug --episode 1
+python -m src.cli subtitle --project slug --episode 3-10
 ```
+
+Subtitle command akan:
+- Blur area subtitle asli (per-segment, lebar dinamis sesuai panjang teks)
+- Tempel teks terjemahan di atas blur dengan ASS pixel-positioned
+- Replace `output/ep{N}_dubbed.mp4` dengan versi bersubtitle
+- Skip kalau sudah pernah di-subtitle (cek `.subtitled` marker)
+
+Atur tampilan di `config.yaml` bagian `subtitle:` (font, size, posisi y, lebar strip blur, dll.).
 
 ### 5. Kelola Karakter
 

@@ -117,6 +117,9 @@ python -m src.cli dub --project senyum-manis-di-bibirnya
 
 # Dub from a specific URL (auto-assigns next episode number)
 python -m src.cli dub --project senyum-manis-di-bibirnya --url "https://..."
+
+# Dub + burn translated subtitle (blur original subtitle + overlay new one)
+python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1 --subtitle
 ```
 
 Output video will be at `projects/your-project/output/ep1_dubbed.mp4`.
@@ -154,7 +157,19 @@ python -m src.cli tts --project slug --episode 1 --character "Yosa Leostra" --fo
 
 # Re-mix audio (if you changed audio settings)
 python -m src.cli mix --project slug --episode 1 --force
+
+# Burn translated subtitle on already-dubbed video
+python -m src.cli subtitle --project slug --episode 1
+python -m src.cli subtitle --project slug --episode 3-10
 ```
+
+The `subtitle` command will:
+- Blur the original subtitle area (per-segment, width adapts to translation length)
+- Overlay the translated text using ASS pixel-positioning
+- Replace `output/ep{N}_dubbed.mp4` with the subtitled version
+- Skip if already applied (tracked via `.subtitled` marker)
+
+Tune appearance in `config.yaml` under the `subtitle:` section (font, size, y position, blur strip dimensions, etc.).
 
 ### 5. Manage Characters
 
