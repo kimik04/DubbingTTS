@@ -127,6 +127,7 @@ def _call_interactions(file_path: Path, mime_type: str, prompt: str, api_key: st
             {"type": media_type, "data": b64_data, "mime_type": mime_type},
             {"type": "text", "text": prompt},
         ],
+        "generation_config": {"thinking_level": "high"},
         "response_format": {"type": "text", "mime_type": "application/json", "schema": RESPONSE_SCHEMA},
         "store": False,
     }
