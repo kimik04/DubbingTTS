@@ -119,26 +119,77 @@ def _upload_file(file_path: Path, api_key: str, mime_type: str) -> str:
 
 
 def _wait_for_processing(file_name: str, api_key: str):
-    log.info("  waiting 20s for video processing...")
-    time.sleep(20)
+    url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
+    for _ in range(60):
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                state = resp.json().get("state", "")
+                if state == "ACTIVE":
+                    log.info("  video processing complete")
+                    return
+                log.info(f"  waiting for video processing... ({state})")
+        except Exception:
+            pass
+        time.sleep(5)
+    raise RuntimeError("Video processing timed out after 5 minutes")
+
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "segments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "speaker": {"type": "string"},
+                    "timestamp": {"type": "string"},
+                    "content": {"type": "string"},
+                    "translation": {"type": "string"},
+                    "language": {"type": "string"},
+                    "gender": {"type": "string"},
+                    "intonation": {"type": "string"}
+                },
+                "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
+            }
+        }
+    },
+    "required": ["summary", "segments"]
+}
+
+
+def _call_gemini(file_uri: str, mime_type: str, prompt: str, api_key: str, model: str) -> dict:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    payload = {
+        "contents": [{"parts": [
+            {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
+            {"text": prompt},
+        ]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": RESPONSE_SCHEMA,
+        },
+    }
+
+    resp = requests.post(url, json=payload, timeout=300)
+    if resp.status_code != 200:
+        log.error(f"  API error {resp.status_code}: {resp.text[:500]}")
+    resp.raise_for_status()
+    data = resp.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    return json.loads(text)
 
 
 @retry()
 def _single_pass_video(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
-    """Single pass: video with hardcoded subtitles. Uses native Gemini timestamp format."""
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
-    source_name = lang_names.get(source_lang, source_lang)
     target_name = lang_names.get(target_lang, target_lang)
 
-    char_list = characters.get("characters", {})
-    char_desc = ""
-    for name, info in char_list.items():
-        aliases = ", ".join(info.get("aliases", []))
-        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
-
-    scene_desc = ""
-    for s in scenes:
-        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+    char_desc = _build_char_desc(characters)
+    scene_desc = _build_scene_desc(scenes)
 
     prompt = f"""Watch and listen to this video carefully.
 
@@ -146,7 +197,7 @@ Your task is to produce a transcription for voice dubbing. For each spoken line:
 - Determine the TIMESTAMP (MM:SS) from when you HEAR the person speaking in the audio. Mark the moment speech begins.
 - Transcribe what is said by listening to the audio.
 - Identify the speaker by their voice characteristics and visual appearance (who is on screen, lip movement).
-- For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Examples: "nervous, trembling, slow", "sarcastic, cutting, fast", "whispering, intimate, breathy", "shouting angrily, aggressive". Keep it under 10 words. This helps the TTS engine replicate the original performance.
+- For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Keep it under 10 words.
 - Translate into {target_name} naturally for dubbing. Keep translations concise — they should be speakable in roughly the same duration as the original speech.
 - Each spoken line = one segment. Do NOT merge lines. Do NOT skip any spoken line.
 
@@ -159,70 +210,18 @@ SCENE CONTEXT:
 
 Provide a brief summary at the beginning."""
 
-    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{model}:generateContent?key={api_key}"
-
-    response_schema = {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "segments": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "speaker": {"type": "string"},
-                        "timestamp": {"type": "string"},
-                        "content": {"type": "string"},
-                        "translation": {"type": "string"},
-                        "language": {"type": "string"},
-                        "gender": {"type": "string"},
-                        "intonation": {"type": "string"}
-                    },
-                    "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
-                }
-            }
-        },
-        "required": ["summary", "segments"]
-    }
-
-    payload = {
-        "contents": [{"parts": [
-            {"fileData": {"mimeType": "video/mp4", "fileUri": file_uri}},
-            {"text": prompt},
-        ]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-            "mediaResolution": "media_resolution_high",
-            "thinkingConfig": {"thinkingLevel": "high"},
-        },
-    }
-
-    resp = requests.post(url, json=payload, timeout=300)
-    resp.raise_for_status()
-    data = resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    result = json.loads(text)
-
+    result = _call_gemini(file_uri, "video/mp4", prompt, api_key, model)
     return _parse_segments(result)
 
 
 @retry()
 def _single_pass_subtitle(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
-    """Read hardcoded subtitles directly. Timestamp = when subtitle appears on screen."""
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
     source_name = lang_names.get(source_lang, source_lang)
     target_name = lang_names.get(target_lang, target_lang)
 
-    char_list = characters.get("characters", {})
-    char_desc = ""
-    for name, info in char_list.items():
-        aliases = ", ".join(info.get("aliases", []))
-        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
-
-    scene_desc = ""
-    for s in scenes:
-        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+    char_desc = _build_char_desc(characters)
+    scene_desc = _build_scene_desc(scenes)
 
     prompt = f"""Watch this video carefully. It has hardcoded subtitles.
 
@@ -230,7 +229,7 @@ Your task:
 - Read EVERY subtitle that appears on screen. The subtitle text is the ground truth.
 - For each subtitle, record the TIMESTAMP (MM:SS) of when it APPEARS on screen.
 - Identify the speaker by voice and visual appearance.
-- For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Examples: "nervous, trembling, slow", "sarcastic, cutting, fast", "whispering, intimate, breathy", "shouting angrily, aggressive". Keep it under 10 words. This helps the TTS engine replicate the original performance.
+- For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Keep it under 10 words.
 - If the subtitle is already in {target_name}, use it directly as the translation. Do NOT re-translate it.
 - If the subtitle is in another language, translate it into {target_name} naturally for dubbing. Keep translations concise.
 - Each subtitle appearance = one segment. Do NOT merge. Do NOT skip any subtitle.
@@ -245,52 +244,86 @@ SCENE CONTEXT:
 
 Provide a brief summary at the beginning."""
 
-    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{model}:generateContent?key={api_key}"
-
-    response_schema = {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "segments": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "speaker": {"type": "string"},
-                        "timestamp": {"type": "string"},
-                        "content": {"type": "string"},
-                        "translation": {"type": "string"},
-                        "language": {"type": "string"},
-                        "gender": {"type": "string"},
-                        "intonation": {"type": "string"}
-                    },
-                    "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
-                }
-            }
-        },
-        "required": ["summary", "segments"]
-    }
-
-    payload = {
-        "contents": [{"parts": [
-            {"fileData": {"mimeType": "video/mp4", "fileUri": file_uri}},
-            {"text": prompt},
-        ]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-            "mediaResolution": "media_resolution_high",
-            "thinkingConfig": {"thinkingLevel": "high"},
-        },
-    }
-
-    resp = requests.post(url, json=payload, timeout=300)
-    resp.raise_for_status()
-    data = resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    result = json.loads(text)
-
+    result = _call_gemini(file_uri, "video/mp4", prompt, api_key, model)
     return _parse_segments(result)
+
+
+@retry()
+def _single_pass_audio(file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model):
+    lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
+    target_name = lang_names.get(target_lang, target_lang)
+
+    char_desc = _build_char_desc(characters)
+    scene_desc = _build_scene_desc(scenes)
+
+    prompt = f"""Process this audio file and generate a detailed transcription.
+
+Requirements:
+1. Identify distinct speakers by voice characteristics.
+2. Provide accurate timestamps for each segment (Format: MM:SS).
+3. Detect the primary language of each segment.
+4. For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Keep it under 10 words.
+5. For each segment, also provide a translation into {target_name} that sounds natural for voice dubbing. Keep translations concise.
+
+KNOWN CHARACTERS:
+{char_desc}
+
+SCENE CONTEXT:
+{scene_desc}
+
+Provide a brief summary at the beginning."""
+
+    result = _call_gemini(file_uri, mime_type, prompt, api_key, model)
+
+    raw_segments = result.get("segments", [])
+    char_genders = {}
+    segments = []
+
+    for i, seg in enumerate(raw_segments):
+        start_ts = seg["timestamp"]
+        if i + 1 < len(raw_segments):
+            end_ts = raw_segments[i + 1]["timestamp"]
+        else:
+            end_ts = start_ts
+
+        intonation = seg.get("intonation", "")
+        translation = seg.get("translation", seg.get("content", ""))
+        if intonation:
+            translation = f"[{intonation}] {translation}"
+
+        character = seg.get("speaker", "Unknown")
+        gender = _normalize_gender(seg.get("gender", "male"))
+
+        s = Segment(
+            index=len(segments),
+            start=start_ts,
+            end=end_ts,
+            text=seg.get("content", ""),
+            character=character,
+            translation=translation,
+        )
+        segments.append(s)
+
+        if character not in char_genders:
+            char_genders[character] = gender
+
+    return segments, char_genders
+
+
+def _build_char_desc(characters: dict) -> str:
+    char_list = characters.get("characters", {})
+    char_desc = ""
+    for name, info in char_list.items():
+        aliases = ", ".join(info.get("aliases", []))
+        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
+    return char_desc
+
+
+def _build_scene_desc(scenes: list[dict]) -> str:
+    scene_desc = ""
+    for s in scenes:
+        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+    return scene_desc
 
 
 def _parse_segments(result: dict) -> tuple[list[Segment], dict]:
@@ -330,119 +363,6 @@ def _parse_segments(result: dict) -> tuple[list[Segment], dict]:
             end_sec = start_sec + 3.0
             m, s = divmod(int(end_sec), 60)
             end_ts = f"{m:02d}:{s:02d}"
-
-        character = seg.get("speaker", "Unknown")
-        gender = _normalize_gender(seg.get("gender", "male"))
-
-        s = Segment(
-            index=len(segments),
-            start=start_ts,
-            end=end_ts,
-            text=seg.get("content", ""),
-            character=character,
-            translation=translation,
-        )
-        segments.append(s)
-
-        if character not in char_genders:
-            char_genders[character] = gender
-
-    return segments, char_genders
-
-
-@retry()
-def _single_pass_audio(file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model):
-    """Single pass: audio only mode."""
-    lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
-    source_name = lang_names.get(source_lang, source_lang)
-    target_name = lang_names.get(target_lang, target_lang)
-
-    char_list = characters.get("characters", {})
-    char_desc = ""
-    for name, info in char_list.items():
-        aliases = ", ".join(info.get("aliases", []))
-        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
-
-    scene_desc = ""
-    for s in scenes:
-        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
-
-    prompt = f"""Process this audio file and generate a detailed transcription.
-
-Requirements:
-1. Identify distinct speakers by voice characteristics.
-2. Provide accurate timestamps for each segment (Format: MM:SS).
-3. Detect the primary language of each segment.
-4. For each line, provide a short English vocal direction cue in the "intonation" field describing HOW the line should be spoken (emotion, tone, speed, volume). Keep it under 10 words.
-5. For each segment, also provide a translation into {target_name} that sounds natural for voice dubbing. Keep translations concise.
-
-KNOWN CHARACTERS:
-{char_desc}
-
-SCENE CONTEXT:
-{scene_desc}
-
-Provide a brief summary at the beginning."""
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-
-    response_schema = {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "segments": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "speaker": {"type": "string"},
-                        "timestamp": {"type": "string"},
-                        "content": {"type": "string"},
-                        "translation": {"type": "string"},
-                        "language": {"type": "string"},
-                        "gender": {"type": "string"},
-                        "intonation": {"type": "string"}
-                    },
-                    "required": ["speaker", "timestamp", "content", "translation", "gender", "intonation"]
-                }
-            }
-        },
-        "required": ["summary", "segments"]
-    }
-
-    payload = {
-        "contents": [{"parts": [
-            {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
-            {"text": prompt},
-        ]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-            "temperature": 0.1,
-        },
-    }
-
-    resp = requests.post(url, json=payload, timeout=300)
-    resp.raise_for_status()
-    data = resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    result = json.loads(text)
-
-    raw_segments = result.get("segments", [])
-    char_genders = {}
-    segments = []
-
-    for i, seg in enumerate(raw_segments):
-        start_ts = seg["timestamp"]
-        if i + 1 < len(raw_segments):
-            end_ts = raw_segments[i + 1]["timestamp"]
-        else:
-            end_ts = start_ts
-
-        intonation = seg.get("intonation", "")
-        translation = seg.get("translation", seg.get("content", ""))
-        if intonation:
-            translation = f"[{intonation}] {translation}"
 
         character = seg.get("speaker", "Unknown")
         gender = _normalize_gender(seg.get("gender", "male"))
