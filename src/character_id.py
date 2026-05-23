@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -51,29 +52,23 @@ def identify_episode(slug: str, episode: int, force: bool = False) -> list[Segme
         video_path = cache / "video.mp4"
         if not video_path.exists():
             raise FileNotFoundError(f"Video not found: {video_path}")
-        log.info(f"ep{episode}: uploading video.mp4 to Gemini (mode={transcription_source})")
-        file_uri = _upload_file(video_path, api_key, "video/mp4")
+        log.info(f"ep{episode}: processing video (mode={transcription_source})")
         if transcription_source == "subtitle":
-            log.info(f"ep{episode}: reading hardcoded subtitles (timestamp = subtitle appearance)")
             identified, char_genders = _single_pass_subtitle(
-                file_uri, characters, scenes, source_lang, target_lang, api_key, model
+                video_path, characters, scenes, source_lang, target_lang, api_key, model
             )
         else:
-            log.info(f"ep{episode}: transcribing from audio+visual (timestamp = speech)")
             identified, char_genders = _single_pass_video(
-                file_uri, characters, scenes, source_lang, target_lang, api_key, model
+                video_path, characters, scenes, source_lang, target_lang, api_key, model
             )
     else:
         vocals_path = cache / "vocals.wav"
         audio_path = vocals_path if vocals_path.exists() else cache / "audio.mp3"
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio not found. Run download + separate first.")
-        audio_mime = "audio/wav" if audio_path.suffix == ".wav" else "audio/mpeg"
-        log.info(f"ep{episode}: uploading {audio_path.name} to Gemini")
-        file_uri = _upload_file(audio_path, api_key, audio_mime)
-        log.info(f"ep{episode}: single-pass audio")
+        log.info(f"ep{episode}: processing audio ({audio_path.name})")
         identified, char_genders = _single_pass_audio(
-            file_uri, audio_mime, characters, scenes, source_lang, target_lang, api_key, model
+            audio_path, characters, scenes, source_lang, target_lang, api_key, model
         )
 
     new_chars = _handle_new_characters(slug, episode, identified, characters, char_genders)
@@ -90,49 +85,6 @@ def _get_scenes(project: dict, episode: int) -> list[dict]:
     ep_key = f"ep{episode}"
     ep_data = episodes.get(ep_key, {})
     return ep_data.get("scenes", [])
-
-
-@retry()
-def _upload_file(file_path: Path, api_key: str, mime_type: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
-
-    file_size = file_path.stat().st_size
-    headers = {
-        "X-Goog-Upload-Command": "start, upload, finalize",
-        "X-Goog-Upload-Header-Content-Length": str(file_size),
-        "X-Goog-Upload-Header-Content-Type": mime_type,
-        "Content-Type": mime_type,
-    }
-
-    with open(file_path, "rb") as f:
-        resp = requests.post(url, headers=headers, data=f, timeout=180)
-
-    resp.raise_for_status()
-    data = resp.json()
-    file_uri = data["file"]["uri"]
-    file_name = data["file"]["name"]
-
-    if mime_type.startswith("video/"):
-        _wait_for_processing(file_name, api_key)
-
-    return file_uri
-
-
-def _wait_for_processing(file_name: str, api_key: str):
-    url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
-    for _ in range(60):
-        try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                state = resp.json().get("state", "")
-                if state == "ACTIVE":
-                    log.info("  video processing complete")
-                    return
-                log.info(f"  waiting for video processing... ({state})")
-        except Exception:
-            pass
-        time.sleep(5)
-    raise RuntimeError("Video processing timed out after 5 minutes")
 
 
 RESPONSE_SCHEMA = {
@@ -160,31 +112,50 @@ RESPONSE_SCHEMA = {
 }
 
 
-def _call_gemini(file_uri: str, mime_type: str, prompt: str, api_key: str, model: str) -> dict:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+@retry()
+def _call_interactions(file_path: Path, mime_type: str, prompt: str, api_key: str, model: str) -> dict:
+    url = f"https://generativelanguage.googleapis.com/v1beta/interactions"
+
+    with open(file_path, "rb") as f:
+        b64_data = base64.b64encode(f.read()).decode()
+
+    media_type = "video" if mime_type.startswith("video/") else "audio"
 
     payload = {
-        "contents": [{"parts": [
-            {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
-            {"text": prompt},
-        ]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": RESPONSE_SCHEMA,
-        },
+        "model": model,
+        "input": [
+            {"type": media_type, "data": b64_data, "mime_type": mime_type},
+            {"type": "text", "text": prompt},
+        ],
+        "response_format": {"type": "text", "mime_type": "application/json", "schema": RESPONSE_SCHEMA},
+        "store": False,
     }
 
-    resp = requests.post(url, json=payload, timeout=300)
+    headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(url, json=payload, headers=headers, timeout=300)
     if resp.status_code != 200:
         log.error(f"  API error {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
     data = resp.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    return json.loads(text)
+
+    text_output = ""
+    for out in data.get("outputs", []):
+        if out.get("type") == "text":
+            text_output = out.get("text", "")
+            break
+
+    if not text_output:
+        raise RuntimeError(f"No text output in response. Keys: {list(data.keys())}")
+
+    return json.loads(text_output)
 
 
 @retry()
-def _single_pass_video(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
+def _single_pass_video(file_path, characters, scenes, source_lang, target_lang, api_key, model):
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
     target_name = lang_names.get(target_lang, target_lang)
 
@@ -210,12 +181,12 @@ SCENE CONTEXT:
 
 Provide a brief summary at the beginning."""
 
-    result = _call_gemini(file_uri, "video/mp4", prompt, api_key, model)
+    result = _call_interactions(file_path, "video/mp4", prompt, api_key, model)
     return _parse_segments(result)
 
 
 @retry()
-def _single_pass_subtitle(file_uri, characters, scenes, source_lang, target_lang, api_key, model):
+def _single_pass_subtitle(file_path, characters, scenes, source_lang, target_lang, api_key, model):
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
     source_name = lang_names.get(source_lang, source_lang)
     target_name = lang_names.get(target_lang, target_lang)
@@ -244,17 +215,19 @@ SCENE CONTEXT:
 
 Provide a brief summary at the beginning."""
 
-    result = _call_gemini(file_uri, "video/mp4", prompt, api_key, model)
+    result = _call_interactions(file_path, "video/mp4", prompt, api_key, model)
     return _parse_segments(result)
 
 
 @retry()
-def _single_pass_audio(file_uri, mime_type, characters, scenes, source_lang, target_lang, api_key, model):
+def _single_pass_audio(file_path, characters, scenes, source_lang, target_lang, api_key, model):
     lang_names = {"zh": "Chinese", "en": "English", "ko": "Korean", "ja": "Japanese", "id": "Indonesian", "th": "Thai"}
     target_name = lang_names.get(target_lang, target_lang)
 
     char_desc = _build_char_desc(characters)
     scene_desc = _build_scene_desc(scenes)
+
+    mime_type = "audio/wav" if file_path.suffix == ".wav" else "audio/mpeg"
 
     prompt = f"""Process this audio file and generate a detailed transcription.
 
@@ -273,57 +246,24 @@ SCENE CONTEXT:
 
 Provide a brief summary at the beginning."""
 
-    result = _call_gemini(file_uri, mime_type, prompt, api_key, model)
-
-    raw_segments = result.get("segments", [])
-    char_genders = {}
-    segments = []
-
-    for i, seg in enumerate(raw_segments):
-        start_ts = seg["timestamp"]
-        if i + 1 < len(raw_segments):
-            end_ts = raw_segments[i + 1]["timestamp"]
-        else:
-            end_ts = start_ts
-
-        intonation = seg.get("intonation", "")
-        translation = seg.get("translation", seg.get("content", ""))
-        if intonation:
-            translation = f"[{intonation}] {translation}"
-
-        character = seg.get("speaker", "Unknown")
-        gender = _normalize_gender(seg.get("gender", "male"))
-
-        s = Segment(
-            index=len(segments),
-            start=start_ts,
-            end=end_ts,
-            text=seg.get("content", ""),
-            character=character,
-            translation=translation,
-        )
-        segments.append(s)
-
-        if character not in char_genders:
-            char_genders[character] = gender
-
-    return segments, char_genders
+    result = _call_interactions(file_path, mime_type, prompt, api_key, model)
+    return _parse_segments(result)
 
 
 def _build_char_desc(characters: dict) -> str:
     char_list = characters.get("characters", {})
-    char_desc = ""
+    desc = ""
     for name, info in char_list.items():
         aliases = ", ".join(info.get("aliases", []))
-        char_desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
-    return char_desc
+        desc += f"- {name} ({info.get('gender', 'unknown')}): {info.get('description', '')}. Aliases: [{aliases}]\n"
+    return desc
 
 
 def _build_scene_desc(scenes: list[dict]) -> str:
-    scene_desc = ""
+    desc = ""
     for s in scenes:
-        scene_desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
-    return scene_desc
+        desc += f"- {s.get('time', '')}: {s.get('description', '')}\n"
+    return desc
 
 
 def _parse_segments(result: dict) -> tuple[list[Segment], dict]:
