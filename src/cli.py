@@ -40,6 +40,7 @@ def main():
     p_dub.add_argument("--url")
     p_dub.add_argument("--force", action="store_true")
     p_dub.add_argument("--subtitle", action="store_true", help="Burn translated subtitle with dynamic blur after mixing")
+    p_dub.add_argument("--no-bg", action="store_true", help="Output only dubbed voices without background music")
 
     p_identify = subparsers.add_parser("identify", help="Identify characters + translate")
     p_identify.add_argument("--project", required=True)
@@ -56,6 +57,7 @@ def main():
     p_mix.add_argument("--project", required=True)
     p_mix.add_argument("--episode", required=True, help="Episode number or range")
     p_mix.add_argument("--force", action="store_true")
+    p_mix.add_argument("--no-bg", action="store_true", help="Output only dubbed voices without background music")
 
     p_subtitle = subparsers.add_parser("subtitle", help="Burn translated subtitle with dynamic blur on dubbed video")
     p_subtitle.add_argument("--project", required=True)
@@ -299,7 +301,7 @@ def cmd_dub(args):
         separate_audio(slug, ep_num, force=args.force)
         identify_episode(slug, ep_num, force=args.force)
         generate_tts_episode_sync(slug, ep_num, force=args.force)
-        mix_episode(slug, ep_num, force=args.force)
+        mix_episode(slug, ep_num, force=args.force, no_bg=args.no_bg)
         if args.subtitle:
             subtitle_episode(slug, ep_num, force=args.force)
 
@@ -330,7 +332,7 @@ def cmd_mix(args):
     links = parse_links(args.project)
     episodes = _parse_episode_range(args.episode, links)
     for ep_num, _ in episodes:
-        output = mix_episode(args.project, ep_num, force=args.force)
+        output = mix_episode(args.project, ep_num, force=args.force, no_bg=args.no_bg)
         print(f"Output: {output}")
 
 

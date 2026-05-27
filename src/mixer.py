@@ -13,7 +13,7 @@ from .utils import get_cache_dir, get_output_dir, load_project_config, load_glob
 log = logging.getLogger(__name__)
 
 
-def mix_episode(slug: str, episode: int, force: bool = False) -> Path:
+def mix_episode(slug: str, episode: int, force: bool = False, no_bg: bool = False) -> Path:
     cache = get_cache_dir(slug, episode)
     output_dir = get_output_dir(slug)
     output_path = output_dir / f"ep{episode}_dubbed.mp4"
@@ -39,7 +39,6 @@ def mix_episode(slug: str, episode: int, force: bool = False) -> Path:
     segments = load_segments(segments_path)
     tts_dir = cache / "tts"
 
-    bg_path = _get_background_audio(audio_path, cache, global_config)
     duration = _get_video_duration(video_path)
 
     log.info(f"ep{episode}: placing TTS segments on timeline")
@@ -50,9 +49,14 @@ def mix_episode(slug: str, episode: int, force: bool = False) -> Path:
     dub_loud = cache / "dub_loud.wav"
     _boost_volume(dub_raw, dub_loud, dub_volume)
 
-    log.info(f"ep{episode}: mixing with background")
-    final_audio = cache / "final.mp3"
-    _mix_with_background(dub_loud, bg_path, final_audio, bg_volume)
+    if no_bg:
+        log.info(f"ep{episode}: no-bg mode, skipping background mix")
+        final_audio = dub_loud
+    else:
+        bg_path = _get_background_audio(audio_path, cache, global_config)
+        log.info(f"ep{episode}: mixing with background")
+        final_audio = cache / "final.mp3"
+        _mix_with_background(dub_loud, bg_path, final_audio, bg_volume)
 
     log.info(f"ep{episode}: muxing video")
     _mux_video(video_path, final_audio, output_path)
