@@ -1,0 +1,3 @@
+# BGM Collection
+# Place background music files here (.mp3, .wav)
+# Use with: python -m src.cli narrate --project slug --episode 1 --bgm "filename.mp3"

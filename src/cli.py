@@ -69,6 +69,13 @@ def main():
     p_merge.add_argument("--episode", help="Episode range (e.g., 1-10, all)")
     p_merge.add_argument("--output", help="Output filename")
 
+    p_narrate = subparsers.add_parser("narrate", help="Generate narration (voiceover translation)")
+    p_narrate.add_argument("--project", required=True)
+    p_narrate.add_argument("--episode", required=True, help="Episode number or range")
+    p_narrate.add_argument("--speed", type=float, help="Speed multiplier (e.g., 0.9, 1.2)")
+    p_narrate.add_argument("--bgm", help="Custom BGM filename from bgm/ folder")
+    p_narrate.add_argument("--force", action="store_true")
+
     p_chars = subparsers.add_parser("characters", help="Manage characters")
     p_chars.add_argument("--project", required=True)
     p_chars.add_argument("--add")
@@ -101,6 +108,8 @@ def main():
             cmd_subtitle(args)
         elif args.command == "merge":
             cmd_merge(args)
+        elif args.command == "narrate":
+            cmd_narrate(args)
         elif args.command == "characters":
             cmd_characters(args)
         elif args.command == "preview":
@@ -342,6 +351,22 @@ def cmd_subtitle(args):
     episodes = _parse_episode_range(args.episode, links)
     for ep_num, _ in episodes:
         output = subtitle_episode(args.project, ep_num, force=args.force)
+        print(f"Output: {output}")
+
+
+def cmd_narrate(args):
+    from .downloader import download_episode, separate_audio
+    from .narrator import narrate_episode_sync
+
+    slug = args.project
+    links = parse_links(slug)
+    episodes = _parse_episode_range(args.episode, links)
+
+    for ep_num, url in episodes:
+        log.info(f"=== Episode {ep_num} (narration) ===")
+        download_episode(slug, ep_num, url, force=args.force)
+        separate_audio(slug, ep_num, force=args.force)
+        output = narrate_episode_sync(slug, ep_num, speed=args.speed, bgm=args.bgm, force=args.force)
         print(f"Output: {output}")
 
 

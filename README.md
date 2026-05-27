@@ -144,6 +144,43 @@ python -m src.cli merge --project senyum-manis-di-bibirnya --episode 1-5 --outpu
 
 Output: `projects/your-project/output/ep1-10_dubbed.mp4` (or `full_dubbed.mp4` for all).
 
+### 3b. Narration (Voiceover Translation)
+
+For videos with existing foreign-language narration (not actor dialogue), translate into target language narration:
+
+```bash
+# Narrate episode (auto-fit to video duration)
+python -m src.cli narrate --project slug --episode 1
+
+# With manual speed
+python -m src.cli narrate --project slug --episode 1 --speed 1.2
+
+# Use custom BGM from bgm/ folder
+python -m src.cli narrate --project slug --episode 1 --bgm "chill-piano.mp3"
+```
+
+Output: `projects/your-project/output/ep1_narrated.mp4`
+
+Narration pipeline:
+1. Download + Demucs (remove original voiceover, keep BGM)
+2. Gemini watches video → generates natural narration text in target language
+3. TTS with single narrator voice
+4. Auto-fit duration: if TTS is 0.8-1.3x video duration → atempo adjust. Outside range → re-generate text
+5. Mix narration + BGM (from demucs or custom)
+
+Per-project config in `project.yaml`:
+
+```yaml
+narration:
+  voice: "Kore"           # narrator voice (see voice list)
+  speed: null             # null = auto-fit, or manual (0.8-1.3)
+  bgm: null              # null = use demucs, or filename in bgm/
+  bgm_volume: 0.3
+  narration_volume: 1.0
+```
+
+Place custom BGM files in the `bgm/` folder at project root.
+
 ### 4. Re-run or Fix Specific Steps
 
 If something goes wrong, you can re-run individual steps:
