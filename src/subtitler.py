@@ -26,8 +26,8 @@ DEFAULT_CONFIG = {
     "min_width": 140,
     "max_width": 540,
     "padding": 20,
-    "blur_sigma": 18,
-    "blur_steps": 3,
+    "blur_sigma": 50,
+    "blur_steps": 4,
 }
 
 

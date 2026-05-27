@@ -72,5 +72,5 @@ subtitle:
   min_width: 140
   max_width: 540
   padding: 20
-  blur_luma: 12
-  blur_chroma: 6
+  blur_sigma: 50
+  blur_steps: 4

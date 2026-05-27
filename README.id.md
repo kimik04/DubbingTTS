@@ -120,6 +120,9 @@ python -m src.cli dub --project senyum-manis-di-bibirnya --url "https://..."
 
 # Dub + burn subtitle Indonesia (blur subtitle asli + tempel subtitle baru)
 python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1 --subtitle
+
+# Dub tanpa background music (hanya suara dubbing)
+python -m src.cli dub --project senyum-manis-di-bibirnya --episode 1 --no-bg
 ```
 
 Output video ada di `projects/nama-project/output/ep1_dubbed.mp4`.
@@ -157,6 +160,9 @@ python -m src.cli tts --project slug --episode 1 --character "Yosa Leostra" --fo
 
 # Re-mix audio (kalau ubah audio settings)
 python -m src.cli mix --project slug --episode 1 --force
+
+# Re-mix tanpa background music (hanya suara dubbing)
+python -m src.cli mix --project slug --episode 1 --force --no-bg
 
 # Burn subtitle Indonesia ke video yang sudah dub-ed
 python -m src.cli subtitle --project slug --episode 1
