@@ -70,7 +70,7 @@ async def narrate_episode(slug: str, episode: int, speed: float | None = None, b
     # Step 2: TTS narration + fit to duration
     log.info(f"ep{episode}: generating narration audio (voice={voice})")
     narration_wav = cache / "narration.wav"
-    await _generate_narration_audio(
+    sentence_durations = await _generate_narration_audio(
         narration_text, narration_wav, voice, target_lang,
         video_duration, speed_override, sample_rate, api_key, model_tts, cache, force
     )
@@ -87,9 +87,9 @@ async def narrate_episode(slug: str, episode: int, speed: float | None = None, b
     log.info(f"ep{episode}: muxing video")
     _mux_video(video_path, final_audio, output_path)
 
-    # Step 6: Auto-subtitle
+    # Step 6: Auto-subtitle (using real TTS durations)
     log.info(f"ep{episode}: burning subtitles")
-    segments = _text_to_segments(narration_text, video_duration)
+    segments = _durations_to_segments(sentence_durations)
     save_segments(segments, cache / "identified_segments.json")
     _burn_subtitles(output_path, segments, project)
 
@@ -168,14 +168,19 @@ async def _generate_narration_audio(
     text: str, output_path: Path, voice: str, target_lang: str,
     video_duration: float, speed_override: float | None,
     sample_rate: int, api_key: str, model: str, cache: Path, force: bool
-):
+) -> list[tuple[str, float]]:
+    """Returns list of (sentence_text, final_duration_seconds) for subtitle sync."""
     raw_wav = cache / "narration_raw.wav"
 
     if not force and raw_wav.exists():
         log.info("  using cached raw narration audio")
+        chunk_durations = _load_chunk_durations(cache)
     else:
-        pcm = await _tts_narration(text, voice, target_lang, api_key, model)
-        _pcm_to_wav(pcm, raw_wav, sample_rate)
+        chunk_pcms, chunk_texts = await _tts_narration(text, voice, target_lang, api_key, model)
+        all_pcm = b"".join(chunk_pcms)
+        _pcm_to_wav(all_pcm, raw_wav, sample_rate)
+        chunk_durations = [(t, len(p) / (sample_rate * 2)) for t, p in zip(chunk_texts, chunk_pcms)]
+        _save_chunk_durations(cache, chunk_durations)
 
     tts_duration = _get_audio_duration(raw_wav)
     ratio = video_duration / tts_duration if tts_duration > 0 else 1.0
@@ -190,8 +195,11 @@ async def _generate_narration_audio(
     else:
         log.warning(f"  ratio {ratio:.2f} outside {SPEED_MIN}-{SPEED_MAX}, re-generating text")
         new_text = _regenerate_text(text, ratio, video_duration, cache)
-        pcm = await _tts_narration(new_text, voice, target_lang, api_key, model)
-        _pcm_to_wav(pcm, raw_wav, sample_rate)
+        chunk_pcms, chunk_texts = await _tts_narration(new_text, voice, target_lang, api_key, model)
+        all_pcm = b"".join(chunk_pcms)
+        _pcm_to_wav(all_pcm, raw_wav, sample_rate)
+        chunk_durations = [(t, len(p) / (sample_rate * 2)) for t, p in zip(chunk_texts, chunk_pcms)]
+        _save_chunk_durations(cache, chunk_durations)
         tts_duration = _get_audio_duration(raw_wav)
         ratio = video_duration / tts_duration if tts_duration > 0 else 1.0
         atempo = max(SPEED_MIN, min(SPEED_MAX, ratio))
@@ -206,6 +214,9 @@ async def _generate_narration_audio(
     final_dur = _get_audio_duration(output_path)
     if final_dur < video_duration:
         _pad_silence(output_path, video_duration, sample_rate)
+
+    scale = 1.0 / atempo if abs(atempo - 1.0) > 0.02 else 1.0
+    return [(t, d * scale) for t, d in chunk_durations]
 
 
 def _regenerate_text(original_text: str, ratio: float, duration: float, cache: Path) -> str:
@@ -234,9 +245,14 @@ def _regenerate_text(original_text: str, ratio: float, duration: float, cache: P
     return new_text
 
 
-async def _tts_narration(text: str, voice: str, target_lang: str, api_key: str, model: str) -> bytes:
+async def _tts_narration(text: str, voice: str, target_lang: str, api_key: str, model: str) -> tuple[list[bytes], list[str]]:
+    """Returns (list_of_pcm_per_sentence, list_of_sentence_texts)."""
+    import re
     lang_names = {"id": "Indonesian", "en": "English", "zh": "Chinese", "ms": "Malay", "th": "Thai"}
     target_name = lang_names.get(target_lang, target_lang)
+
+    sentences = re.split(r'(?<=[.!?。！？])\s*', text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
 
     ws = await _connect_ws(api_key, model)
     try:
@@ -264,15 +280,12 @@ async def _tts_narration(text: str, voice: str, target_lang: str, api_key: str, 
         if "setupComplete" not in data:
             raise RuntimeError(f"Setup failed: {data}")
 
-        # Split text into chunks to avoid WS message size limits
-        chunks = _split_text(text, max_chars=800)
         all_pcm = []
-
-        for i, chunk in enumerate(chunks):
-            log.info(f"  TTS chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+        for i, sentence in enumerate(sentences):
+            log.info(f"  TTS sentence {i+1}/{len(sentences)} ({len(sentence)} chars)")
             msg = {
                 "clientContent": {
-                    "turns": [{"role": "user", "parts": [{"text": chunk}]}],
+                    "turns": [{"role": "user", "parts": [{"text": sentence}]}],
                     "turnComplete": True,
                 }
             }
@@ -303,7 +316,7 @@ async def _tts_narration(text: str, voice: str, target_lang: str, api_key: str, 
             all_pcm.append(b"".join(pcm_chunks))
             await asyncio.sleep(1)
 
-        return b"".join(all_pcm)
+        return all_pcm, sentences
     finally:
         try:
             await ws.close()
@@ -432,22 +445,29 @@ def _pad_silence(wav_path: Path, target_duration: float, sample_rate: int):
     padded.replace(wav_path)
 
 
-def _text_to_segments(text: str, duration: float) -> list[Segment]:
-    import re
-    sentences = re.split(r'(?<=[.!?。！？])\s*', text.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
+def _save_chunk_durations(cache: Path, durations: list[tuple[str, float]]):
+    path = cache / "narration_durations.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(durations, f, ensure_ascii=False)
 
-    if not sentences:
+
+def _load_chunk_durations(cache: Path) -> list[tuple[str, float]]:
+    path = cache / "narration_durations.json"
+    if not path.exists():
         return []
+    with open(path, encoding="utf-8") as f:
+        return [tuple(x) for x in json.load(f)]
 
-    total_chars = sum(len(s) for s in sentences)
+
+def _durations_to_segments(sentence_durations: list[tuple[str, float]]) -> list[Segment]:
     segments = []
     current_time = 0.0
 
-    for i, sentence in enumerate(sentences):
-        seg_duration = (len(sentence) / total_chars) * duration if total_chars > 0 else duration / len(sentences)
+    for i, (text, dur) in enumerate(sentence_durations):
+        if not text.strip():
+            continue
         start = current_time
-        end = current_time + seg_duration
+        end = current_time + dur
         current_time = end
 
         m_s, s_s = divmod(int(start), 60)
@@ -457,16 +477,16 @@ def _text_to_segments(text: str, duration: float) -> list[Segment]:
             index=i,
             start=f"{m_s:02d}:{s_s:02d}",
             end=f"{m_e:02d}:{s_e:02d}",
-            text=sentence,
+            text=text,
             character="Narrator",
-            translation=sentence,
+            translation=text,
         ))
 
     return segments
 
 
 def _burn_subtitles(video_path: Path, segments: list[Segment], project: dict):
-    from .subtitler import subtitle_episode, _auto_config, _video_size, _write_ass, _render
+    from .subtitler import _auto_config, _video_size, _write_ass, _render
 
     width, height = _video_size(video_path)
     cfg = {**_auto_config(width, height), **(project.get("subtitle") or {})}
