@@ -8,27 +8,51 @@ from pathlib import Path
 
 from .utils import (
     PROJECT_ROOT, Segment, get_cache_dir, get_output_dir,
-    load_global_config, load_segments,
+    load_project_config, load_segments,
 )
 
 log = logging.getLogger(__name__)
 
-DEFAULT_CONFIG = {
-    "font": "Arial",
-    "font_size": 22,
-    "bold": True,
-    "primary_color": "&H0000FFFF",
-    "outline_color": "&H00000000",
-    "outline": 2,
-    "y_center": 690,
-    "strip_height": 100,
-    "char_width": 14,
-    "min_width": 140,
-    "max_width": 540,
-    "padding": 20,
-    "blur_sigma": 50,
-    "blur_steps": 4,
-}
+
+def _auto_config(width: int, height: int) -> dict:
+    """Calculate subtitle config based on video dimensions."""
+    ratio = width / height
+
+    if ratio < 0.7:
+        # Vertical (9:16) — subtitle di ~67% tinggi
+        y_center = int(height * 0.67)
+        font_size = max(16, int(width * 0.038))
+        strip_height = int(height * 0.09)
+    elif ratio < 1.0:
+        # Square-ish (3:4, 2:3)
+        y_center = int(height * 0.75)
+        font_size = max(18, int(width * 0.035))
+        strip_height = int(height * 0.08)
+    else:
+        # Horizontal (16:9, 4:3)
+        y_center = int(height * 0.85)
+        font_size = max(20, int(width * 0.022))
+        strip_height = int(height * 0.08)
+
+    char_w = max(8, int(font_size * 0.65))
+    max_w = min(int(width * 0.93), width - 4)
+
+    return {
+        "font": "Arial",
+        "font_size": font_size,
+        "bold": True,
+        "primary_color": "&H00FFFFFF",
+        "outline_color": "&H00000000",
+        "outline": 2,
+        "y_center": y_center,
+        "strip_height": strip_height,
+        "char_width": char_w,
+        "min_width": max(100, int(width * 0.25)),
+        "max_width": max_w,
+        "padding": 20,
+        "blur_sigma": 50,
+        "blur_steps": 4,
+    }
 
 
 def subtitle_episode(slug: str, episode: int, force: bool = False) -> Path:
@@ -47,13 +71,15 @@ def subtitle_episode(slug: str, episode: int, force: bool = False) -> Path:
         log.info(f"ep{episode}: subtitle already applied, skipping")
         return dubbed
 
-    cfg = {**DEFAULT_CONFIG, **(load_global_config().get("subtitle") or {})}
     segments = [s for s in load_segments(segments_path) if _strip_intonation(s.translation)]
     if not segments:
         log.warning(f"ep{episode}: no translated segments, skipping")
         return dubbed
 
     width, height = _video_size(dubbed)
+    project = load_project_config(slug)
+    cfg = {**_auto_config(width, height), **(project.get("subtitle") or {})}
+
     ass_path = cache / "subs.ass"
     _write_ass(ass_path, segments, width, height, cfg)
 

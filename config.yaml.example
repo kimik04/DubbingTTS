@@ -57,20 +57,3 @@ voices:
 demucs:
   model: "htdemucs"
   two_stems: true
-
-# Subtitle burn (used by `subtitle` command and `dub --subtitle`)
-subtitle:
-  font: "Arial"
-  font_size: 22
-  bold: true
-  primary_color: "&H0000FFFF"   # ASS BGR — kuning
-  outline_color: "&H00000000"
-  outline: 2
-  y_center: 690                 # pixel y untuk center subtitle (asumsi 576x1024)
-  strip_height: 100
-  char_width: 14                # px per karakter (untuk lebar blur dinamis)
-  min_width: 140
-  max_width: 540
-  padding: 20
-  blur_sigma: 50
-  blur_steps: 4

@@ -174,8 +174,18 @@ The `subtitle` command will:
 - Overlay the translated text using ASS pixel-positioning
 - Replace `output/ep{N}_dubbed.mp4` with the subtitled version
 - Skip if already applied (tracked via `.subtitled` marker)
+- Auto-adapt position and font size based on video aspect ratio (9:16, 16:9, 3:4, etc.)
 
-Tune appearance in `config.yaml` under the `subtitle:` section (font, size, y position, blur strip dimensions, etc.).
+Override appearance per-project in `project.yaml` under `subtitle:` (optional — without overrides, everything is calculated from video dimensions):
+
+```yaml
+# project.yaml (example override)
+subtitle:
+  y_center: 690        # y center position for subtitle (pixel)
+  font_size: 24        # font size
+  strip_height: 100    # blur strip height
+  blur_sigma: 50       # blur strength (higher = cleaner)
+```
 
 ### 5. Manage Characters
 

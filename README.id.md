@@ -174,8 +174,18 @@ Subtitle command akan:
 - Tempel teks terjemahan di atas blur dengan ASS pixel-positioned
 - Replace `output/ep{N}_dubbed.mp4` dengan versi bersubtitle
 - Skip kalau sudah pernah di-subtitle (cek `.subtitled` marker)
+- Auto-adapt posisi dan ukuran font berdasarkan rasio video (9:16, 16:9, 3:4, dll.)
 
-Atur tampilan di `config.yaml` bagian `subtitle:` (font, size, posisi y, lebar strip blur, dll.).
+Override tampilan per-project di `project.yaml` bagian `subtitle:` (opsional — tanpa override, semua dihitung otomatis dari dimensi video):
+
+```yaml
+# project.yaml (contoh override)
+subtitle:
+  y_center: 690        # posisi y center subtitle (pixel)
+  font_size: 24        # ukuran font
+  strip_height: 100    # tinggi area blur
+  blur_sigma: 50       # kekuatan blur (makin tinggi = makin bersih)
+```
 
 ### 5. Kelola Karakter
 
