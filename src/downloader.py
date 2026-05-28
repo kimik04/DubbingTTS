@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .utils import get_cache_dir, load_project_config, load_global_config, parse_links, retry
+from .utils import get_cache_dir, load_project_config, load_global_config, parse_links, retry, PROJECT_ROOT
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +26,15 @@ def download_episode(slug: str, episode: int, url: str, force: bool = False) -> 
         shutil.copy2(source, video_path)
     else:
         log.info(f"ep{episode}: downloading {url}")
-        _download_url(url, video_path)
+        cookies = PROJECT_ROOT / "projects" / slug / "cookies.txt"
+        try:
+            _download_url(url, video_path)
+        except Exception as e:
+            if cookies.exists():
+                log.warning(f"ep{episode}: download failed, retrying with cookies.txt")
+                _download_url(url, video_path, cookies_path=cookies)
+            else:
+                raise
 
     log.info(f"ep{episode}: extracting audio")
     _extract_audio(video_path, audio_path)
@@ -76,13 +84,15 @@ def separate_audio(slug: str, episode: int, force: bool = False) -> tuple[Path, 
 
 
 @retry(max_retries=3)
-def _download_url(url: str, output: Path):
+def _download_url(url: str, output: Path, cookies_path: Path | None = None):
     cmd = [
         "yt-dlp", "--no-playlist",
         "-o", str(output),
         "--merge-output-format", "mp4",
-        url,
     ]
+    if cookies_path:
+        cmd.extend(["--cookies", str(cookies_path)])
+    cmd.append(url)
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
