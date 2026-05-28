@@ -172,6 +172,14 @@ def _call_gemini(video_path: Path, prompt: str, api_key: str, model: str) -> dic
     raise RuntimeError("No text output in response")
 
 
+def _normalize_ts(ts: str) -> str:
+    import re
+    ts = ts.strip()
+    ts = re.sub(r'\s*[-–—]\s*', ':', ts)
+    ts = re.sub(r'\s+', ':', ts)
+    return ts
+
+
 def _parse_segments(result: dict) -> list[Segment]:
     from .utils import parse_timestamp
 
@@ -179,9 +187,9 @@ def _parse_segments(result: dict) -> list[Segment]:
     segments = []
 
     for i, seg in enumerate(raw):
-        start_ts = seg["timestamp"]
+        start_ts = _normalize_ts(seg["timestamp"])
         if i + 1 < len(raw):
-            end_ts = raw[i + 1]["timestamp"]
+            end_ts = _normalize_ts(raw[i + 1]["timestamp"])
         else:
             end_ts = start_ts
 
