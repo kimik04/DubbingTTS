@@ -208,6 +208,16 @@ def cmd_auto(args):
                 "bgm_volume": 0.3,
                 "narration_volume": 1.0,
             }
+            data["subtitle"] = {
+                "font": "Arial",
+                "font_size": None,
+                "bold": True,
+                "primary_color": "&H00FFFFFF",
+                "outline_color": "&H00000000",
+                "outline": 2,
+                "blur_sigma": 50,
+                "blur_steps": 4,
+            }
         with open(project_yaml, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
@@ -254,6 +264,16 @@ def cmd_init(args):
                 "bgm": None,
                 "bgm_volume": 0.3,
                 "narration_volume": 1.0,
+            }
+            data["subtitle"] = {
+                "font": "Arial",
+                "font_size": None,
+                "bold": True,
+                "primary_color": "&H00FFFFFF",
+                "outline_color": "&H00000000",
+                "outline": 2,
+                "blur_sigma": 50,
+                "blur_steps": 4,
             }
         with open(project_yaml, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
