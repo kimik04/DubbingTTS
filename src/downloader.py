@@ -89,7 +89,6 @@ def _download_url(url: str, output: Path, cookies_path: Path | None = None):
         "yt-dlp", "--no-playlist",
         "-o", str(output),
         "--merge-output-format", "mp4",
-        "-f", "bv*+ba/b",
     ]
     if cookies_path:
         cmd.extend(["--cookies", str(cookies_path)])
