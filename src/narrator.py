@@ -185,26 +185,39 @@ def _parse_segments(result: dict) -> list[Segment]:
 
     raw = result.get("segments", [])
     segments = []
+    MAX_CHARS = 60
+    GAP = 0.3
 
     for i, seg in enumerate(raw):
         start_ts = _normalize_ts(seg["timestamp"])
         if i + 1 < len(raw):
-            end_ts = _normalize_ts(raw[i + 1]["timestamp"])
+            next_ts = _normalize_ts(raw[i + 1]["timestamp"])
+            next_sec = parse_timestamp(next_ts)
         else:
-            end_ts = start_ts
+            next_ts = start_ts
+            next_sec = None
 
         start_sec = parse_timestamp(start_ts)
-        end_sec = parse_timestamp(end_ts)
+        end_sec = parse_timestamp(next_ts) if next_sec is not None else start_sec + 4.0
         slot = end_sec - start_sec
 
         if slot > 10.0:
             end_sec = start_sec + 5.0
-            m, s = divmod(int(end_sec), 60)
-            end_ts = f"{m:02d}:{s:02d}"
         elif slot <= 0:
             end_sec = start_sec + 4.0
-            m, s = divmod(int(end_sec), 60)
-            end_ts = f"{m:02d}:{s:02d}"
+
+        end_sec = end_sec - GAP if end_sec - GAP > start_sec else end_sec
+
+        m, s = divmod(int(end_sec), 60)
+        end_ts = f"{m:02d}:{s:02d}"
+
+        translation = seg.get("translation", seg.get("content", ""))
+        if len(translation) > MAX_CHARS:
+            cut = translation[:MAX_CHARS].rfind(" ")
+            if cut > MAX_CHARS // 2:
+                translation = translation[:cut] + "..."
+            else:
+                translation = translation[:MAX_CHARS] + "..."
 
         segments.append(Segment(
             index=i,
@@ -212,7 +225,7 @@ def _parse_segments(result: dict) -> list[Segment]:
             end=end_ts,
             text=seg.get("content", ""),
             character="Narrator",
-            translation=seg.get("translation", seg.get("content", "")),
+            translation=translation,
         ))
 
     return segments
