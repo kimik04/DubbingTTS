@@ -404,7 +404,8 @@ def cmd_narrate(args):
     for ep_num, url in episodes:
         log.info(f"=== Episode {ep_num} (narration) ===")
         download_episode(slug, ep_num, url, force=args.force)
-        separate_audio(slug, ep_num, force=args.force)
+        if not args.bgm:
+            separate_audio(slug, ep_num, force=args.force)
         output = narrate_episode_sync(slug, ep_num, voice=args.voice, speed=args.speed, bgm=args.bgm, force=args.force)
         print(f"Output: {output}")
 

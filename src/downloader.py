@@ -70,10 +70,21 @@ def separate_audio(slug: str, episode: int, force: bool = False) -> tuple[Path, 
         "-o", str(demucs_out),
         str(audio_path),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     stem_name = audio_path.stem
     src_vocals = demucs_out / demucs_model / stem_name / "vocals.wav"
+
+    if result.returncode != 0 or not src_vocals.exists():
+        log.warning(f"ep{episode}: demucs failed, using audio as vocals with silent background")
+        shutil.copy2(audio_path, vocals_path)
+        duration_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(audio_path)]
+        dur = float(subprocess.run(duration_cmd, check=True, capture_output=True, text=True).stdout.strip())
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", f"anullsrc=r=24000:cl=mono",
+            "-t", str(dur), str(no_vocals_path),
+        ], check=True, capture_output=True, text=True)
+        return vocals_path, no_vocals_path
     src_no_vocals = demucs_out / demucs_model / stem_name / "no_vocals.wav"
 
     shutil.copy2(src_vocals, vocals_path)
