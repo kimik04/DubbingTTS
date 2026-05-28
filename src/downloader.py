@@ -89,6 +89,7 @@ def _download_url(url: str, output: Path, cookies_path: Path | None = None):
         "yt-dlp", "--no-playlist",
         "-o", str(output),
         "--merge-output-format", "mp4",
+        "-f", "bv*+ba/b",
     ]
     if cookies_path:
         cmd.extend(["--cookies", str(cookies_path)])
@@ -96,7 +97,33 @@ def _download_url(url: str, output: Path, cookies_path: Path | None = None):
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def _has_audio_stream(video: Path) -> bool:
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "csv=p=0",
+        str(video),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return bool(result.stdout.strip())
+
+
 def _extract_audio(video: Path, audio: Path):
+    if not _has_audio_stream(video):
+        log.warning("  video has no audio stream, creating silent audio")
+        duration_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)]
+        dur = float(subprocess.run(duration_cmd, check=True, capture_output=True, text=True).stdout.strip())
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"anullsrc=r=24000:cl=mono",
+            "-t", str(dur),
+            "-acodec", "libmp3lame",
+            str(audio),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return
+
     cmd = [
         "ffmpeg", "-y", "-i", str(video),
         "-vn", "-acodec", "libmp3lame", "-q:a", "2",
