@@ -191,7 +191,6 @@ def _parse_segments(result: dict) -> list[Segment]:
 
     raw = result.get("segments", [])
     segments = []
-    MAX_CHARS = 60
     GAP = 0.3
 
     for i, seg in enumerate(raw):
@@ -217,21 +216,13 @@ def _parse_segments(result: dict) -> list[Segment]:
         m, s = divmod(int(end_sec), 60)
         end_ts = f"{m:02d}:{s:02d}"
 
-        translation = seg.get("translation", seg.get("content", ""))
-        if len(translation) > MAX_CHARS:
-            cut = translation[:MAX_CHARS].rfind(" ")
-            if cut > MAX_CHARS // 2:
-                translation = translation[:cut] + "..."
-            else:
-                translation = translation[:MAX_CHARS] + "..."
-
         segments.append(Segment(
             index=i,
             start=start_ts,
             end=end_ts,
             text=seg.get("content", ""),
             character="Narrator",
-            translation=translation,
+            translation=seg.get("translation", seg.get("content", "")),
         ))
 
     return segments
