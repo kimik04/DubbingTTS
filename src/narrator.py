@@ -461,27 +461,45 @@ def _speed_video(video_path: Path, speed: float, cache: Path, force: bool) -> Pa
         return output
 
     pts = 1.0 / speed
-    atempo_filters = []
-    remaining = speed
-    while remaining > 2.0:
-        atempo_filters.append("atempo=2.0")
-        remaining /= 2.0
-    while remaining < 0.5:
-        atempo_filters.append("atempo=0.5")
-        remaining /= 0.5
-    atempo_filters.append(f"atempo={remaining:.4f}")
+    has_audio = _has_audio(video_path)
 
-    cmd = [
-        "ffmpeg", "-y", "-i", str(video_path),
-        "-filter_complex",
-        f"[0:v]setpts={pts:.4f}*PTS[v];[0:a]{','.join(atempo_filters)}[a]",
-        "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast",
-        "-c:a", "aac",
-        str(output),
-    ]
+    if has_audio:
+        atempo_filters = []
+        remaining = speed
+        while remaining > 2.0:
+            atempo_filters.append("atempo=2.0")
+            remaining /= 2.0
+        while remaining < 0.5:
+            atempo_filters.append("atempo=0.5")
+            remaining /= 0.5
+        atempo_filters.append(f"atempo={remaining:.4f}")
+
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-filter_complex",
+            f"[0:v]setpts={pts:.4f}*PTS[v];[0:a]{','.join(atempo_filters)}[a]",
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "fast",
+            "-c:a", "aac",
+            str(output),
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-vf", f"setpts={pts:.4f}*PTS",
+            "-an",
+            "-c:v", "libx264", "-preset", "fast",
+            str(output),
+        ]
+
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     return output
+
+
+def _has_audio(path: Path) -> bool:
+    cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return bool(result.stdout.strip())
 
 
 def _pcm_to_wav(pcm_data: bytes, output_path: Path, sample_rate: int):
