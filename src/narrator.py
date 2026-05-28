@@ -377,11 +377,7 @@ def _place_tts_segments(segments: list[Segment], tts_dir: Path, duration: float,
     for i, (seg, wav) in enumerate(tts_files):
         inputs.extend(["-i", str(wav)])
         delay_ms = int(seg.start_sec * 1000)
-        slot_dur = seg.end_sec - seg.start_sec
-        if slot_dur > 0:
-            filter_parts.append(f"[{i+1}]atrim=duration={slot_dur:.3f},asetpts=PTS-STARTPTS,adelay={delay_ms}|{delay_ms}[d{i}]")
-        else:
-            filter_parts.append(f"[{i+1}]adelay={delay_ms}|{delay_ms}[d{i}]")
+        filter_parts.append(f"[{i+1}]adelay={delay_ms}|{delay_ms}[d{i}]")
 
     mix_inputs = "[0]" + "".join(f"[d{i}]" for i in range(len(tts_files)))
     filter_parts.append(f"{mix_inputs}amix=inputs={len(tts_files)+1}:duration=first:dropout_transition=0:normalize=0")
