@@ -175,7 +175,13 @@ def _call_gemini(video_path: Path, prompt: str, api_key: str, model: str) -> dic
 def _normalize_ts(ts: str) -> str:
     import re
     ts = ts.strip()
-    ts = re.sub(r'\s*[-–—]\s*', ':', ts)
+    # Handle range "00:03-00:05" — first part already has colon, take it
+    range_match = re.match(r'(\d+:\d+(?::\d+)?)\s*[-–—]\s*\d', ts)
+    if range_match:
+        ts = range_match.group(1)
+    # Handle "00 - 00" (no colons, dash as MM:SS separator) → "00:00"
+    elif re.match(r'^\d+\s*[-–—]\s*\d+$', ts):
+        ts = re.sub(r'\s*[-–—]\s*', ':', ts)
     ts = re.sub(r'\s+', ':', ts)
     return ts
 
