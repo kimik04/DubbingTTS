@@ -26,11 +26,13 @@ def main():
     p_auto.add_argument("url", help="Episode 1 URL (ReelShort, GoodShort, etc.)")
     p_auto.add_argument("--source", default="zh", help="Source language (default: zh)")
     p_auto.add_argument("--target", default="id", help="Target language (default: id)")
+    p_auto.add_argument("--narration", action="store_true", help="Create as narration project")
 
     p_init = subparsers.add_parser("init", help="Create new project")
     p_init.add_argument("title")
     p_init.add_argument("--source", required=True)
     p_init.add_argument("--target", required=True)
+    p_init.add_argument("--narration", action="store_true", help="Create as narration project")
 
     p_projects = subparsers.add_parser("projects", help="List projects")
 
@@ -72,6 +74,7 @@ def main():
     p_narrate = subparsers.add_parser("narrate", help="Generate narration (voiceover translation)")
     p_narrate.add_argument("--project", required=True)
     p_narrate.add_argument("--episode", required=True, help="Episode number or range")
+    p_narrate.add_argument("--voice", default="Kore", help="Narrator voice (default: Kore)")
     p_narrate.add_argument("--speed", type=float, help="Speed multiplier (e.g., 0.9, 1.2)")
     p_narrate.add_argument("--bgm", help="Custom BGM filename from bgm/ folder")
     p_narrate.add_argument("--force", action="store_true")
@@ -197,8 +200,16 @@ def cmd_auto(args):
             "language": {"source": args.source, "target": args.target},
             "episodes": {},
         }
+        if args.narration:
+            data["narration"] = {
+                "voice": "Kore",
+                "speed": None,
+                "bgm": None,
+                "bgm_volume": 0.3,
+                "narration_volume": 1.0,
+            }
         with open(project_yaml, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     chars_yaml = project_dir / "characters.yaml"
     if not chars_yaml.exists():
@@ -236,8 +247,16 @@ def cmd_init(args):
             "language": {"source": args.source, "target": args.target},
             "episodes": {},
         }
+        if args.narration:
+            data["narration"] = {
+                "voice": "Kore",
+                "speed": None,
+                "bgm": None,
+                "bgm_volume": 0.3,
+                "narration_volume": 1.0,
+            }
         with open(project_yaml, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     chars_yaml = project_dir / "characters.yaml"
     if not chars_yaml.exists():
@@ -366,7 +385,7 @@ def cmd_narrate(args):
         log.info(f"=== Episode {ep_num} (narration) ===")
         download_episode(slug, ep_num, url, force=args.force)
         separate_audio(slug, ep_num, force=args.force)
-        output = narrate_episode_sync(slug, ep_num, speed=args.speed, bgm=args.bgm, force=args.force)
+        output = narrate_episode_sync(slug, ep_num, voice=args.voice, speed=args.speed, bgm=args.bgm, force=args.force)
         print(f"Output: {output}")
 
 

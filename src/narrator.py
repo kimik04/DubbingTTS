@@ -41,11 +41,11 @@ RESPONSE_SCHEMA = {
 }
 
 
-def narrate_episode_sync(slug: str, episode: int, speed: float | None = None, bgm: str | None = None, force: bool = False) -> Path:
-    return asyncio.run(narrate_episode(slug, episode, speed, bgm, force))
+def narrate_episode_sync(slug: str, episode: int, voice: str = "Kore", speed: float | None = None, bgm: str | None = None, force: bool = False) -> Path:
+    return asyncio.run(narrate_episode(slug, episode, voice, speed, bgm, force))
 
 
-async def narrate_episode(slug: str, episode: int, speed: float | None = None, bgm: str | None = None, force: bool = False) -> Path:
+async def narrate_episode(slug: str, episode: int, voice: str = "Kore", speed: float | None = None, bgm: str | None = None, force: bool = False) -> Path:
     cache = get_cache_dir(slug, episode)
     output_dir = get_output_dir(slug)
     output_path = output_dir / f"ep{episode}_narrated.mp4"
@@ -60,7 +60,6 @@ async def narrate_episode(slug: str, episode: int, speed: float | None = None, b
 
     project = load_project_config(slug)
     global_config = load_global_config()
-    narration_cfg = project.get("narration", {})
 
     api_key = global_config["gemini_api_key"]
     model_transcribe = global_config["models"]["transcribe"]
@@ -69,11 +68,10 @@ async def narrate_episode(slug: str, episode: int, speed: float | None = None, b
     max_speed = global_config["audio"].get("max_speed", 1.5)
     target_lang = project["language"]["target"]
 
-    voice = narration_cfg.get("voice", "Kore")
-    narration_volume = narration_cfg.get("narration_volume", 1.0)
-    bgm_volume = narration_cfg.get("bgm_volume", 0.3)
-    bgm_source = bgm or narration_cfg.get("bgm", None)
-    speed_val = speed or narration_cfg.get("speed", None)
+    narration_volume = 1.0
+    bgm_volume = 0.3
+    bgm_source = bgm
+    speed_val = speed
 
     # Step 0: Speed-adjust video if requested (before Gemini sees it)
     if speed_val and speed_val != 1.0:
@@ -436,6 +434,7 @@ def _get_video_duration(path: Path) -> float:
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)]
     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     return float(result.stdout.strip())
+
 
 
 def _speed_video(video_path: Path, speed: float, cache: Path, force: bool) -> Path:
