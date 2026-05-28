@@ -158,42 +158,32 @@ def _write_ass(path: Path, segments: list[Segment], width: int, height: int, cfg
 
 
 def _render(input_path: Path, ass_path: Path, segments: list[Segment], video_w: int, output: Path, cfg: dict):
-    n = len(segments)
-    splits = "".join(f"[s{i}]" for i in range(n + 1))
-    parts = [f"[0:v]split={n+1}{splits}"]
-
     strip_h = cfg["strip_height"]
     y_top = max(0, cfg["y_center"] - strip_h // 2)
     sigma = cfg["blur_sigma"]
     steps = cfg["blur_steps"]
-    char_w = cfg["char_width"]
-    pad = cfg["padding"]
-    min_w = cfg["min_width"]
-    max_w = min(cfg["max_width"], video_w - 4)
 
-    cur = "s0"
-    for i, seg in enumerate(segments):
-        text = _strip_intonation(seg.translation)
-        text_len = max(1, len(text))
-        w = min(max_w, max(min_w, text_len * char_w + pad * 2))
-        w -= w % 2
-        x = (video_w - w) // 2
-        x -= x % 2
+    blur_w = min(int(video_w * 0.7), cfg["max_width"])
+    blur_w -= blur_w % 2
+    blur_x = (video_w - blur_w) // 2
+    blur_x -= blur_x % 2
+
+    enable_parts = []
+    for seg in segments:
         start = seg.start_sec
         end = seg.end_sec if seg.end_sec > start else start + 2.0
-        parts.append(
-            f"[s{i+1}]crop={w}:{strip_h}:{x}:{y_top},"
-            f"gblur=sigma={sigma}:steps={steps}[b{i}]"
-        )
-        parts.append(
-            f"[{cur}][b{i}]overlay={x}:{y_top}:enable='between(t,{start:.3f},{end:.3f})'[v{i}]"
-        )
-        cur = f"v{i}"
+        enable_parts.append(f"between(t\\,{start:.3f}\\,{end:.3f})")
+    enable_expr = "+".join(enable_parts)
 
     rel_ass = ass_path.relative_to(PROJECT_ROOT)
     ass_arg = str(rel_ass).replace("\\", "/")
-    parts.append(f"[{cur}]ass={ass_arg}[outv]")
-    filter_complex = ";".join(parts)
+
+    filter_complex = (
+        f"[0:v]split[base][forblur];"
+        f"[forblur]crop={blur_w}:{strip_h}:{blur_x}:{y_top},gblur=sigma={sigma}:steps={steps}[blurred];"
+        f"[base][blurred]overlay={blur_x}:{y_top}:enable='{enable_expr}'[withblur];"
+        f"[withblur]ass={ass_arg}[outv]"
+    )
 
     cmd = [
         "ffmpeg", "-y",
