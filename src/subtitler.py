@@ -123,8 +123,8 @@ def _video_size(path: Path) -> tuple[int, int]:
 
 def _write_ass(path: Path, segments: list[Segment], width: int, height: int, cfg: dict):
     bold = -1 if cfg["bold"] else 0
-    cx = width // 2
-    cy = cfg["y_center"]
+    margin_v = height - cfg["y_center"]
+    margin_lr = int(width * 0.05)
 
     lines = [
         "[Script Info]",
@@ -139,7 +139,7 @@ def _write_ass(path: Path, segments: list[Segment], width: int, height: int, cfg
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: Default,{cfg['font']},{cfg['font_size']},{cfg['primary_color']},&H000000FF,"
-        f"{cfg['outline_color']},&H00000000,{bold},0,0,0,100,100,0,0,1,{cfg['outline']},0,5,10,10,10,1",
+        f"{cfg['outline_color']},&H00000000,{bold},0,0,0,100,100,0,0,1,{cfg['outline']},0,2,{margin_lr},{margin_lr},{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -150,8 +150,7 @@ def _write_ass(path: Path, segments: list[Segment], width: int, height: int, cfg
         start = seg.start_sec
         end = seg.end_sec if seg.end_sec > start else start + 2.0
         lines.append(
-            f"Dialogue: 0,{_fmt_ts(start)},{_fmt_ts(end)},Default,,0,0,0,,"
-            f"{{\\pos({cx},{cy})}}{text}"
+            f"Dialogue: 0,{_fmt_ts(start)},{_fmt_ts(end)},Default,,0,0,0,,{text}"
         )
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
