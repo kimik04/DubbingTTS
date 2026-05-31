@@ -170,9 +170,10 @@ def _call_gemini(video_path: Path, prompt: str, api_key: str, model: str) -> dic
             return json.loads(out["text"])
 
     for step in data.get("steps", []):
-        for out in step.get("outputs", []):
-            if out.get("type") == "text":
-                return json.loads(out["text"])
+        if step.get("type") == "model_output":
+            for item in step.get("content", []):
+                if item.get("type") == "text":
+                    return json.loads(item["text"])
 
     raise RuntimeError(f"No text output in response. Keys: {list(data.keys())}")
 

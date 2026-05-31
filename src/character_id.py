@@ -151,10 +151,11 @@ def _call_interactions(file_path: Path, mime_type: str, prompt: str, api_key: st
 
     if not text_output:
         for step in data.get("steps", []):
-            for out in step.get("outputs", []):
-                if out.get("type") == "text":
-                    text_output = out.get("text", "")
-                    break
+            if step.get("type") == "model_output":
+                for item in step.get("content", []):
+                    if item.get("type") == "text":
+                        text_output = item.get("text", "")
+                        break
             if text_output:
                 break
 
