@@ -150,6 +150,15 @@ def _call_interactions(file_path: Path, mime_type: str, prompt: str, api_key: st
             break
 
     if not text_output:
+        for step in data.get("steps", []):
+            for out in step.get("outputs", []):
+                if out.get("type") == "text":
+                    text_output = out.get("text", "")
+                    break
+            if text_output:
+                break
+
+    if not text_output:
         raise RuntimeError(f"No text output in response. Keys: {list(data.keys())}")
 
     return json.loads(text_output)

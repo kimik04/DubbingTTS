@@ -169,7 +169,12 @@ def _call_gemini(video_path: Path, prompt: str, api_key: str, model: str) -> dic
         if out.get("type") == "text":
             return json.loads(out["text"])
 
-    raise RuntimeError("No text output in response")
+    for step in data.get("steps", []):
+        for out in step.get("outputs", []):
+            if out.get("type") == "text":
+                return json.loads(out["text"])
+
+    raise RuntimeError(f"No text output in response. Keys: {list(data.keys())}")
 
 
 def _normalize_ts(ts: str) -> str:
